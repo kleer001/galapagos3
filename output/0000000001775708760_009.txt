@@ -1,0 +1,7 @@
+Genome seed: 2991475523, 2399812658, 3666483241, 1407856579, 1062025380, 2370227941, 2470188531, 786015868, 2630956708, 1116135614, 2498219670, 1494051083, 1396169833, 3390127508, 769954842, 4031596437
+Image index: 9
+
+HSV Channel Expressions:
+H(x,y) = exp(abs(exp(sin(x) + x + sqrt(tan(sqrt(tan(sin(tan((-0.023592114))))))))))
+S(x,y) = exp(abs(exp(sin(x) + x + sqrt(tan(sqrt(tan(sin(tan((-0.023592114))))))))))
+V(x,y) = exp(abs(exp(sin(x) + x + sqrt(tan(sqrt(tan(sin(tan((-0.023592114))))))))))

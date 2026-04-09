@@ -17,6 +17,28 @@ pub enum Expr {
 }
 
 impl Expr {
+    pub fn random(width: u32, height: u32, image_idx: usize) -> Self {
+        let genes: Vec<u32> = (0..64).map(|_| rand::random::<u32>()).collect();
+        Expr::random_seed(width, height, image_idx)
+    }
+
+    pub fn random_seed(width: u32, height: u32, image_idx: usize) -> Self {
+        // Create a seeded pseudo-random generator based on dimensions and image index
+        let seed = ((width as u64 * 31337) ^ (height as u64 * 65689) ^ (image_idx as u64 * 12345)) as u32;
+        let mut state = seed % u32::MAX;
+
+        fn next_val(state: &mut u32) -> u32 {
+            *state = (*state as u64 * 1664525 + 1013904223) as u32;
+            *state
+        }
+
+        // Build a more complex expression tree using the grammar approach
+        let genes: Vec<u32> = (0..128).map(|_| next_val(&mut state)).collect();
+        use crate::grammar::{Reader, build_expr};
+        let mut reader = Reader::new(&genes);
+        build_expr(&mut reader, 0)
+    }
+
     pub fn eval(&self, x: f32, y: f32) -> f32 {
         match self {
             Expr::X => x,

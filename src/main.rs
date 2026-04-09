@@ -48,11 +48,14 @@ fn main() {
         let mut reader = Reader::new(&genes);
         let expr = build_expr(&mut reader, 0);
 
-        let pixels = render(&expr, 1024, 1024);
+        let width = 256;
+        let height = 256;
 
-        // Save image
-        let filename = format!("{}/{:019}.png", output_path, timestamp);
-        image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(1024, 1024, {
+        let pixels = render(&expr, width, height, i);
+
+        // Save image - add counter to make filenames unique within batch
+        let filename = format!("{}/{:019}_{:03}.png", output_path, timestamp, i);
+        image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(256, 256, {
             let mut rgba: Vec<u8> = vec![0; pixels.len() * 4];
             for (j, &p) in pixels.iter().enumerate() {
                 rgba[j * 4] = p;
@@ -66,18 +69,27 @@ fn main() {
         .save(&filename)
         .expect("Failed to save image");
 
-        // Save expression as text
-        let expr_str = expr_to_string(&expr);
+        // Generate three separate expression trees for H, S, V channels
+        let h_expr = expr::Expr::random(width, height, i * 1000 + 7);
+        let s_expr = expr::Expr::random(width, height, i * 1000 + 13);
+        let v_expr = expr::Expr::random(width, height, i * 1000 + 19);
+
+        // Save expression as text - all three channels
+        let h_str = expr_to_string(&h_expr);
+        let s_str = expr_to_string(&s_expr);
+        let v_str = expr_to_string(&v_expr);
         let func_text = format!(
-            "Genome seed: {}\nImage index: {}\n\nExpression:\nf(x,y) = {}\n",
+            "Genome seed: {}\nImage index: {}\n\nHSV Channel Expressions:\nH(x,y) = {}\nS(x,y) = {}\nV(x,y) = {}\n",
             genes.iter().take(16).map(|x| x.to_string()).collect::<Vec<_>>().join(", "),
             i,
-            expr_str
+            h_str,
+            s_str,
+            v_str
         );
-        let func_filename = format!("{}/{:019}.txt", output_path, timestamp);
+        let func_filename = format!("{}/{:019}_{:03}.txt", output_path, timestamp, i);
         fs::write(&func_filename, func_text)
             .expect("Failed to save expression file");
 
-        println!("Generated: {} - {}", filename, expr_str);
+        println!("Generated: {} - H={}, S={}, V={}", filename, h_str, s_str, v_str);
     }
 }
