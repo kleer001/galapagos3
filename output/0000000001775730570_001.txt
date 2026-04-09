@@ -1,0 +1,18 @@
+Timestamp: 1775730570
+
+Image Index: 1
+
+Genes (first 16):
+3189753966, 979510164, 966381351, 934327132, 1908878342, 1015702756, 2644198327, 164177477, 2829274379, 914955282, 2109296445, 170728692, 1528640419, 694099426, 1045583372, 2338608199
+
+--- Expressions ---
+
+H (Hue) expression:
+pow(sqrt((-0.57394075)) + pow(sqrt(sqrt(sqrt(exp(pow(sin((-0.9128508)), abs(pow((-0.42462897), pow(cos(abs((-0.9288377))) - y, abs(pow(x, (-0.52702653)) + sin((-0.01778233))) / sin(sqrt(sqrt(x)))))))))) * sqrt(x)), (0.57795024)), pow(abs(pow((-0.42462897), pow(cos(abs((-0.9288377))) - y, abs(pow((-0.92354894), pow(pow(sqrt(sqrt(sqrt((0.09980798))) * (0.24929845) + abs(x)), abs(pow((-0.42462897), pow(x - (0.050993323), cos((0.7947557)))))), abs(y))) + abs(pow((-0.92354894), pow(pow(sqrt(x), cos(x)), sqrt(sqrt((0.44251156))))) + pow(sin((-0.9128508)), abs(pow((-0.42462897), pow(x, (0.24734533)))))) / x) / cos(abs(y))))) - y, abs(pow((-0.92354894), pow(pow(sqrt(sqrt(sqrt(exp(pow(sin((-0.9128508)), abs(pow((-0.42462897), pow(x, (0.24734533)))))))) * x), cos(abs(y))), abs(pow((-0.92354894), pow(pow(sqrt(sqrt(sqrt((0.09980798))) * (0.24929845) + abs(x)), abs(pow((-0.42462897), pow(x - (0.050993323), cos((0.7947557)))))), abs(y))) + abs(pow((-0.92354894), pow(pow(sqrt(x), cos(x)), sqrt(sqrt((0.44251156))))) + pow(sin((-0.9128508)), abs(pow((-0.42462897), pow(x, (0.24734533)))))) / x) / cos(abs(y)))) + y)))
+
+S (Saturation) expression:
+exp(cos((-0.046664357)))
+
+V (Value) expression:
+(-0.7016606)
+

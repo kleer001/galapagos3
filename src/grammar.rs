@@ -15,9 +15,9 @@ impl<'a> Reader<'a> {
     }
 }
 
-const MAX_DEPTH: usize = 25;
-// 13 operators * 8 repeats each = 104, so terminal chance = 1/104 ≈ 0.96%
-const OPERATOR_REPEATS: u32 = 8;
+const MAX_DEPTH: usize = 15;
+// 13 operators * 3 repeats each = 39, so terminal chance = 1/39 ≈ 2.6%
+const OPERATOR_REPEATS: u32 = 3;
 
 pub fn build_expr(reader: &mut Reader, depth: usize) -> crate::expr::Expr {
     if depth > MAX_DEPTH {
@@ -28,9 +28,44 @@ pub fn build_expr(reader: &mut Reader, depth: usize) -> crate::expr::Expr {
     let op_idx = (reader.next() % 13) as usize;
     let repeat_idx = (reader.next() % OPERATOR_REPEATS) as usize;
 
+    // Early in the tree, heavily favor recursion over terminals
+    // Only allow terminal on last repeat if we're already deep in the tree
     if repeat_idx == (OPERATOR_REPEATS - 1) as usize {
-        // Last repeat of this operator -> hit terminal
-        terminal(reader)
+        let early_tree = depth < 5;
+        if early_tree || reader.next() % 3 == 0 {
+            // 1/3 chance to continue even on last repeat when deep
+            terminal(reader)
+        } else {
+            // Continue recursion instead of hitting terminal
+            match op_idx {
+                0 => crate::expr::Expr::Add(
+                    Box::new(build_expr(reader, depth + 1)),
+                    Box::new(build_expr(reader, depth + 1)),
+                ),
+                1 => crate::expr::Expr::Sub(
+                    Box::new(build_expr(reader, depth + 1)),
+                    Box::new(build_expr(reader, depth + 1)),
+                ),
+                2 => crate::expr::Expr::Mul(
+                    Box::new(build_expr(reader, depth + 1)),
+                    Box::new(build_expr(reader, depth + 1)),
+                ),
+                3 => crate::expr::Expr::Div(
+                    Box::new(build_expr(reader, depth + 1)),
+                    Box::new(build_expr(reader, depth + 1)),
+                ),
+                4 => crate::expr::Expr::Sin(Box::new(build_expr(reader, depth + 1))),
+                5 => crate::expr::Expr::Cos(Box::new(build_expr(reader, depth + 1))),
+                6 => crate::expr::Expr::Abs(Box::new(build_expr(reader, depth + 1))),
+                7 => crate::expr::Expr::Sqrt(Box::new(build_expr(reader, depth + 1))),
+                9 => crate::expr::Expr::Pow(
+                    Box::new(build_expr(reader, depth + 1)),
+                    Box::new(build_expr(reader, depth + 1)),
+                ),
+                10 => crate::expr::Expr::Exp(Box::new(build_expr(reader, depth + 1))),
+                _ => terminal(reader),
+            }
+        }
     } else {
         match op_idx {
             0 => crate::expr::Expr::Add(
@@ -51,9 +86,8 @@ pub fn build_expr(reader: &mut Reader, depth: usize) -> crate::expr::Expr {
             ),
             4 => crate::expr::Expr::Sin(Box::new(build_expr(reader, depth + 1))),
             5 => crate::expr::Expr::Cos(Box::new(build_expr(reader, depth + 1))),
-            6 => crate::expr::Expr::Tan(Box::new(build_expr(reader, depth + 1))),
-            7 => crate::expr::Expr::Abs(Box::new(build_expr(reader, depth + 1))),
-            8 => crate::expr::Expr::Sqrt(Box::new(build_expr(reader, depth + 1))),
+            6 => crate::expr::Expr::Abs(Box::new(build_expr(reader, depth + 1))),
+            7 => crate::expr::Expr::Sqrt(Box::new(build_expr(reader, depth + 1))),
             9 => crate::expr::Expr::Pow(
                 Box::new(build_expr(reader, depth + 1)),
                 Box::new(build_expr(reader, depth + 1)),
@@ -65,7 +99,7 @@ pub fn build_expr(reader: &mut Reader, depth: usize) -> crate::expr::Expr {
 }
 
 fn terminal(reader: &mut Reader) -> crate::expr::Expr {
-    match reader.next() % 3 {
+    match reader.next() % 4 {
         0 => crate::expr::Expr::X,
         1 => crate::expr::Expr::Y,
         _ => {

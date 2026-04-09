@@ -18,7 +18,7 @@ pub enum Expr {
 
 impl Expr {
     pub fn random(width: u32, height: u32, image_idx: usize) -> Self {
-        let genes: Vec<u32> = (0..64).map(|_| rand::random::<u32>()).collect();
+        let _genes: Vec<u32> = (0..64).map(|_| rand::random::<u32>()).collect();
         Expr::random_seed(width, height, image_idx)
     }
 
