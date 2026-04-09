@@ -15,9 +15,16 @@ fn expr_to_string(e: &expr::Expr) -> String {
         expr::Expr::Y => "y".to_string(),
         expr::Expr::Const(c) => format!("({})", c),
         expr::Expr::Add(a, b) => format!("{} + {}", expr_to_string(a), expr_to_string(b)),
+        expr::Expr::Sub(a, b) => format!("{} - {}", expr_to_string(a), expr_to_string(b)),
         expr::Expr::Mul(a, b) => format!("{} * {}", expr_to_string(a), expr_to_string(b)),
+        expr::Expr::Div(a, b) => format!("{} / {}", expr_to_string(a), expr_to_string(b)),
         expr::Expr::Sin(a) => format!("sin({})", expr_to_string(a)),
         expr::Expr::Cos(a) => format!("cos({})", expr_to_string(a)),
+        expr::Expr::Tan(a) => format!("tan({})", expr_to_string(a)),
+        expr::Expr::Abs(a) => format!("abs({})", expr_to_string(a)),
+        expr::Expr::Sqrt(a) => format!("sqrt({})", expr_to_string(a)),
+        expr::Expr::Pow(a, b) => format!("pow({}, {})", expr_to_string(a), expr_to_string(b)),
+        expr::Expr::Exp(a) => format!("exp({})", expr_to_string(a)),
     }
 }
 
