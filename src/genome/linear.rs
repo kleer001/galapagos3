@@ -23,6 +23,25 @@ pub enum OpCode {
     Smoothstep = 17,
     Length = 18,
     Dot = 19,
+    // Phase 2 operators
+    Acos = 20,
+    Asin = 21,
+    Atan = 22,
+    Sinh = 23,
+    Cosh = 24,
+    Tanh = 25,
+    Min = 26,
+    Max = 27,
+    Clamp = 28,
+    Sign = 29,
+    Floor = 30,
+    Ceil = 31,
+    Round = 32,
+    Negate = 33,
+    Step = 34,
+    Reciprocal = 35,
+    Invert = 36,
+    Radial = 37,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -154,6 +173,106 @@ pub fn tree_to_instructions(tree: &Node) -> Vec<Instruction> {
                 emit(right, stack);
                 let right_idx = stack.len() as i32 - 1;
                 stack.push(Instruction { op: OpCode::Dot, a: left_idx, b: right_idx, c: 0, value: 0.0 });
+            }
+            // Phase 2 operators
+            Node::Acos(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Acos, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Asin(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Asin, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Atan(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Atan, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Sinh(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Sinh, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Cosh(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Cosh, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Tanh(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Tanh, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Min(left, right) => {
+                emit(left, stack);
+                let left_idx = stack.len() as i32 - 1;
+                emit(right, stack);
+                let right_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Min, a: left_idx, b: right_idx, c: 0, value: 0.0 });
+            }
+            Node::Max(left, right) => {
+                emit(left, stack);
+                let left_idx = stack.len() as i32 - 1;
+                emit(right, stack);
+                let right_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Max, a: left_idx, b: right_idx, c: 0, value: 0.0 });
+            }
+            Node::Clamp(value, min, max) => {
+                emit(value, stack);
+                let value_idx = stack.len() as i32 - 1;
+                emit(min, stack);
+                let min_idx = stack.len() as i32 - 1;
+                emit(max, stack);
+                let max_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Clamp, a: value_idx, b: min_idx, c: max_idx, value: 0.0 });
+            }
+            Node::Sign(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Sign, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Floor(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Floor, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Ceil(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Ceil, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Round(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Round, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Negate(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Negate, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Step(edge, x_node) => {
+                emit(edge, stack);
+                let edge_idx = stack.len() as i32 - 1;
+                emit(x_node, stack);
+                let x_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Step, a: edge_idx, b: x_idx, c: 0, value: 0.0 });
+            }
+            Node::Reciprocal(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Reciprocal, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Invert(child) => {
+                emit(child, stack);
+                let child_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::Invert, a: child_idx, b: 0, c: 0, value: 0.0 });
+            }
+            Node::Radial => {
+                // Radial computes sqrt(x*x + y*y) where x and y are the coordinates
+                stack.push(Instruction { op: OpCode::Radial, a: 0, b: 0, c: 0, value: 0.0 });
             }
         }
     }
@@ -287,10 +406,8 @@ impl Genome {
                     let b = instr.b as usize;
                     if a < used && b < used {
                         let denom = stack[b];
-                        if denom.abs() >= 1e-6 {
-                            stack[used] = stack[a] / denom;
-                            used += 1;
-                        }
+                        stack[used] = if denom.abs() >= 1e-6 { stack[a] / denom } else { 0.0 };
+                        used += 1;
                     }
                 }
                 OpCode::Pow => {
@@ -299,13 +416,8 @@ impl Genome {
                     if a < used && b < used {
                         let base = stack[a];
                         let exp = stack[b];
-                        if base > 0.0 {
-                            stack[used] = base.powf(exp);
-                            used += 1;
-                        } else {
-                            stack[used] = 0.0;
-                            used += 1;
-                        }
+                        stack[used] = if base > 0.0 { base.powf(exp) } else { 0.0 };
+                        used += 1;
                     }
                 }
                 OpCode::Mix => {
@@ -346,6 +458,143 @@ impl Genome {
                         stack[used] = stack[a] * stack[b];
                         used += 1;
                     }
+                }
+                // Phase 2 operators
+                OpCode::Acos => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        let v = stack[idx].clamp(-1.0, 1.0);
+                        stack[used] = v.acos();
+                        used += 1;
+                    }
+                }
+                OpCode::Asin => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        let v = stack[idx].clamp(-1.0, 1.0);
+                        stack[used] = v.asin();
+                        used += 1;
+                    }
+                }
+                OpCode::Atan => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].atan();
+                        used += 1;
+                    }
+                }
+                OpCode::Sinh => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].sinh();
+                        used += 1;
+                    }
+                }
+                OpCode::Cosh => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].cosh();
+                        used += 1;
+                    }
+                }
+                OpCode::Tanh => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].tanh();
+                        used += 1;
+                    }
+                }
+                OpCode::Min => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    if a < used && b < used {
+                        stack[used] = stack[a].min(stack[b]);
+                        used += 1;
+                    }
+                }
+                OpCode::Max => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    if a < used && b < used {
+                        stack[used] = stack[a].max(stack[b]);
+                        used += 1;
+                    }
+                }
+                OpCode::Clamp => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    let c = instr.c as usize;
+                    if a < used && b < used && c < used {
+                        let v = stack[a];
+                        let lo = stack[b];
+                        let hi = stack[c];
+                        stack[used] = v.clamp(lo, hi);
+                        used += 1;
+                    }
+                }
+                OpCode::Sign => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].copysign(1.0);
+                        used += 1;
+                    }
+                }
+                OpCode::Floor => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].floor();
+                        used += 1;
+                    }
+                }
+                OpCode::Ceil => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].ceil();
+                        used += 1;
+                    }
+                }
+                OpCode::Round => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = stack[idx].round();
+                        used += 1;
+                    }
+                }
+                OpCode::Negate => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = -stack[idx];
+                        used += 1;
+                    }
+                }
+                OpCode::Step => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    if a < used && b < used {
+                        let edge = stack[a];
+                        let x_val = stack[b];
+                        stack[used] = if x_val >= edge { 1.0 } else { 0.0 };
+                        used += 1;
+                    }
+                }
+                OpCode::Reciprocal => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        let v = stack[idx];
+                        stack[used] = if v.abs() >= 1e-6 { 1.0 / v } else { 0.0 };
+                        used += 1;
+                    }
+                }
+                OpCode::Invert => {
+                    let idx = instr.a as usize;
+                    if idx < used {
+                        stack[used] = 1.0 - stack[idx];
+                        used += 1;
+                    }
+                }
+                OpCode::Radial => {
+                    stack[used] = (x * x + y * y).sqrt();
+                    used += 1;
                 }
             }
         }

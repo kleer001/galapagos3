@@ -43,6 +43,43 @@ pub enum Node {
     Length(Box<Node>),
     /// Dot(a, b) - dot product
     Dot(Box<Node>, Box<Node>),
+    // Phase 2: Additional operators
+    /// Acos(child) - inverse cosine
+    Acos(Box<Node>),
+    /// Asin(child) - inverse sine
+    Asin(Box<Node>),
+    /// Atan(child) - inverse tangent
+    Atan(Box<Node>),
+    /// Sinh(child) - hyperbolic sine
+    Sinh(Box<Node>),
+    /// Cosh(child) - hyperbolic cosine
+    Cosh(Box<Node>),
+    /// Tanh(child) - hyperbolic tangent
+    Tanh(Box<Node>),
+    /// Min(left, right) - minimum
+    Min(Box<Node>, Box<Node>),
+    /// Max(left, right) - maximum
+    Max(Box<Node>, Box<Node>),
+    /// Clamp(value, min, max) - clamp to range
+    Clamp(Box<Node>, Box<Node>, Box<Node>),
+    /// Sign(child) - sign function (-1, 0, or 1)
+    Sign(Box<Node>),
+    /// Floor(child) - floor function
+    Floor(Box<Node>),
+    /// Ceil(child) - ceiling function
+    Ceil(Box<Node>),
+    /// Round(child) - round to nearest integer
+    Round(Box<Node>),
+    /// Negate(child) - unary minus
+    Negate(Box<Node>),
+    /// Step(edge, x) - hard step function
+    Step(Box<Node>, Box<Node>),
+    /// Reciprocal(child) - 1/x
+    Reciprocal(Box<Node>),
+    /// Invert(child) - 1.0 - x
+    Invert(Box<Node>),
+    /// Radial() - distance from center (0,0)
+    Radial,
 }
 
 const MAX_TREE_DEPTH: usize = 6;
@@ -51,9 +88,7 @@ const MAX_TREE_SIZE: usize = 15;
 
 impl Node {
     pub fn random(rng: &mut impl Rng) -> Self {
-        let tree = Self::random_bounded(rng, MAX_TREE_DEPTH, MAX_TREE_SIZE);
-        eprintln!("Generated tree: {:?}", tree);
-        tree
+        Self::random_bounded(rng, MAX_TREE_DEPTH, MAX_TREE_SIZE)
     }
 
     fn random_bounded(rng: &mut impl Rng, max_depth: usize, max_size: usize) -> Self {
@@ -61,76 +96,95 @@ impl Node {
         let remaining_budget = max_size;
 
         if remaining_budget < MIN_TREE_SIZE || current_depth >= max_depth {
-            // Terminal node: X, Y, or Const
-            let choice = rng.gen_range(0..3);
-            match choice {
+            // Terminal node: always X or Y (guarantees coordinate dependency)
+            match rng.gen_range(0..2) {
                 0 => Node::X,
-                1 => Node::Y,
-                _ => Node::Const(rng.gen_range(-5.0..5.0)),
+                _ => Node::Y,
             }
         } else {
-            // Choose an operator based on remaining budget
-            let op = rng.gen_range(0..20);
+            // 1% terminal rate: weighted random selection favoring operators over terminals
+            if rng.gen_bool(0.01) {
+                // Terminal: always X or Y
+                match rng.gen_range(0..2) {
+                    0 => Node::X,
+                    _ => Node::Y,
+                }
+            } else {
+                // Non-terminal operators (unary, binary, ternary)
+                let op = rng.gen_range(3..45);
 
-            match op {
-                // Terminal inputs: X, Y
-                0..=1 => {
-                    if current_depth < max_depth - 1 {
-                        // Wrap X/Y in a function for more interesting patterns
-                        let choice = rng.gen_range(0..2);
+                match op {
+                    // Phase 1 Unary operators (Sin, Cos, Tan, Abs, Sqrt, Log, Exp, Fract, Length)
+                    3..=11 => {
                         let child = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
-                        match choice {
-                            0 => Node::Sin(child),
-                            _ => Node::Cos(child),
+                        match op {
+                            3 => Node::Sin(child),
+                            4 => Node::Cos(child),
+                            5 => Node::Tan(child),
+                            6 => Node::Abs(child),
+                            7 => Node::Sqrt(child),
+                            8 => Node::Log(child),
+                            9 => Node::Exp(child),
+                            10 => Node::Fract(child),
+                            _ => Node::Length(child),
                         }
-                    } else {
-                        if rng.gen_bool(0.5) { Node::X } else { Node::Y }
                     }
-                }
-                // Constant
-                2 => Node::Const(rng.gen_range(-5.0..5.0)),
-                // Unary operators (Sin, Cos, Tan, Abs, Sqrt, Log, Exp, Fract, Length)
-                3..=11 => {
-                    let child = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
-                    match op {
-                        3 => Node::Sin(child),
-                        4 => Node::Cos(child),
-                        5 => Node::Tan(child),
-                        6 => Node::Abs(child),
-                        7 => Node::Sqrt(child),
-                        8 => Node::Log(child),
-                        9 => Node::Exp(child),
-                        10 => Node::Fract(child),
-                        _ => Node::Length(child),
+                    // Phase 2 Unary operators (Acos, Asin, Atan, Sinh, Cosh, Tanh, Sign, Floor, Ceil, Round, Negate, Reciprocal, Invert)
+                    12..=24 => {
+                        let child = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        match op {
+                            12 => Node::Acos(child),
+                            13 => Node::Asin(child),
+                            14 => Node::Atan(child),
+                            15 => Node::Sinh(child),
+                            16 => Node::Cosh(child),
+                            17 => Node::Tanh(child),
+                            18 => Node::Sign(child),
+                            19 => Node::Floor(child),
+                            20 => Node::Ceil(child),
+                            21 => Node::Round(child),
+                            22 => Node::Negate(child),
+                            23 => Node::Reciprocal(child),
+                            _ => Node::Invert(child),
+                        }
                     }
-                }
-                // Binary operators (Add, Sub, Mul, Div, Pow, Mix)
-                12..=17 => {
-                    let left = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
-                    let right = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
-                    match op {
-                        12 => Node::Add(left, right),
-                        13 => Node::Sub(left, right),
-                        14 => Node::Mul(left, right),
-                        15 => Node::Div(left, right),
-                        16 => Node::Pow(left, right),
-                        _ => Node::Mix(left, right, Box::new(Node::Const(rng.gen_range(0.0..1.0)))),
+                    // Phase 1 Binary operators (Add, Sub, Mul, Div, Pow, Mix, Dot)
+                    25..=32 => {
+                        let left = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        let right = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        match op {
+                            25 => Node::Add(left, right),
+                            26 => Node::Sub(left, right),
+                            27 => Node::Mul(left, right),
+                            28 => Node::Div(left, right),
+                            29 => Node::Pow(left, right),
+                            30 => Node::Mix(left, right, Box::new(Node::Const(rng.gen_range(0.0..1.0)))),
+                            31 => Node::Dot(left, right),
+                            _ => Node::Step(left, right), // Step as binary
+                        }
                     }
-                }
-                // Ternary operator (Smoothstep)
-                18 => {
-                    let left = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 3));
-                    Node::Smoothstep(
-                        Box::new(Node::Const(-1.0)),
-                        Box::new(Node::Const(1.0)),
-                        left,
-                    )
-                }
-                // Dot product (simplified scalar)
-                _ => {
-                    let left = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
-                    let right = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
-                    Node::Dot(left, right)
+                    // Phase 2 Binary operators (Min, Max, Clamp treated as binary with const)
+                    33..=34 => {
+                        let left = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        let right = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        match op {
+                            33 => Node::Min(left, right),
+                            _ => Node::Max(left, right),
+                        }
+                    }
+                    // Ternary operators (Smoothstep, Clamp)
+                    35..=36 => {
+                        let a = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 3));
+                        let b = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 3));
+                        let c = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 3));
+                        match op {
+                            35 => Node::Smoothstep(a, b, c),
+                            _ => Node::Clamp(a, b, c),
+                        }
+                    }
+                    // Radial (no arguments)
+                    37..=44 => Node::Radial,
+                    _ => Node::Radial, // Fallback for any out-of-range values
                 }
             }
         }
@@ -184,6 +238,43 @@ impl Node {
                 // Simplified: treat as scalar dot product
                 left.eval(x, y) * right.eval(x, y)
             }
+            // Phase 2 operators
+            Node::Acos(child) => {
+                let v = child.eval(x, y).clamp(-1.0, 1.0);
+                v.acos()
+            }
+            Node::Asin(child) => {
+                let v = child.eval(x, y).clamp(-1.0, 1.0);
+                v.asin()
+            }
+            Node::Atan(child) => child.eval(x, y).atan(),
+            Node::Sinh(child) => child.eval(x, y).sinh(),
+            Node::Cosh(child) => child.eval(x, y).cosh(),
+            Node::Tanh(child) => child.eval(x, y).tanh(),
+            Node::Min(left, right) => left.eval(x, y).min(right.eval(x, y)),
+            Node::Max(left, right) => left.eval(x, y).max(right.eval(x, y)),
+            Node::Clamp(value, min, max) => {
+                let v = value.eval(x, y);
+                let lo = min.eval(x, y);
+                let hi = max.eval(x, y);
+                v.clamp(lo, hi)
+            }
+            Node::Sign(child) => child.eval(x, y).copysign(1.0),
+            Node::Floor(child) => child.eval(x, y).floor(),
+            Node::Ceil(child) => child.eval(x, y).ceil(),
+            Node::Round(child) => child.eval(x, y).round(),
+            Node::Negate(child) => -child.eval(x, y),
+            Node::Step(edge, x_node) => {
+                let e = edge.eval(x, y);
+                let xv = x_node.eval(x, y);
+                if xv >= e { 1.0 } else { 0.0 }
+            }
+            Node::Reciprocal(child) => {
+                let v = child.eval(x, y);
+                if v.abs() > 1e-6 { 1.0 / v } else { 0.0 }
+            }
+            Node::Invert(child) => 1.0 - child.eval(x, y),
+            Node::Radial => (x * x + y * y).sqrt(),
         }
     }
 }

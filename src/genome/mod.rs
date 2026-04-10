@@ -1,14 +1,5 @@
-use rand::Rng;
+pub mod node;
+pub mod linear;
 
-pub struct Genome {
-    pub genes: Vec<u32>,
-}
-
-impl Genome {
-    pub fn random(len: usize) -> Self {
-        let mut rng = rand::thread_rng();
-        Self {
-            genes: (0..len).map(|_| rng.gen()).collect(),
-        }
-    }
-}
+pub use node::Node;
+pub use linear::{Genome, Instruction, OpCode};
