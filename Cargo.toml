@@ -3,14 +3,22 @@ name = "galapagos3"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "galapagos3"
+path = "src/main.rs"
+
+[[bin]]
+name = "test_gpu"
+path = "src/bin/test_gpu.rs"
+
 [dependencies]
 rand = "0.8"
-rand_chacha = "0.3"
 image = "0.24"
-png = "0.17"
-crc32fast = "1.5.0"
-adler32 = "1.2.0"
-flate2 = "1.0"
+minifb = "0.27"
+wgpu = "0.19"
+bytemuck = { version = "1.16", features = ["derive"] }
+futures-channel = "0.3"
+tokio = { version = "1", features = ["full"] }
 
 [profile.dev]
 opt-level = 1

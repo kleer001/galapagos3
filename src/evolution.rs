@@ -111,6 +111,52 @@ fn mutate_subtree(node: &Node, rng: &mut impl Rng) -> Node {
                 Node::Dot(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
             }
         }
+        // Phase 2 unary operators
+        Node::Acos(child) => Node::Acos(Box::new(mutate_subtree(child, rng))),
+        Node::Asin(child) => Node::Asin(Box::new(mutate_subtree(child, rng))),
+        Node::Atan(child) => Node::Atan(Box::new(mutate_subtree(child, rng))),
+        Node::Sinh(child) => Node::Sinh(Box::new(mutate_subtree(child, rng))),
+        Node::Cosh(child) => Node::Cosh(Box::new(mutate_subtree(child, rng))),
+        Node::Tanh(child) => Node::Tanh(Box::new(mutate_subtree(child, rng))),
+        Node::Sign(child) => Node::Sign(Box::new(mutate_subtree(child, rng))),
+        Node::Floor(child) => Node::Floor(Box::new(mutate_subtree(child, rng))),
+        Node::Ceil(child) => Node::Ceil(Box::new(mutate_subtree(child, rng))),
+        Node::Round(child) => Node::Round(Box::new(mutate_subtree(child, rng))),
+        Node::Negate(child) => Node::Negate(Box::new(mutate_subtree(child, rng))),
+        Node::Reciprocal(child) => Node::Reciprocal(Box::new(mutate_subtree(child, rng))),
+        Node::Invert(child) => Node::Invert(Box::new(mutate_subtree(child, rng))),
+        // Phase 2 binary operators
+        Node::Min(left, right) => {
+            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
+                Node::Min(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
+            } else {
+                Node::Min(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
+            }
+        }
+        Node::Max(left, right) => {
+            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
+                Node::Max(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
+            } else {
+                Node::Max(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
+            }
+        }
+        Node::Step(edge, x_node) => {
+            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
+                Node::Step(Box::new(mutate_subtree(edge, rng)), Box::new(x_node.as_ref().clone()))
+            } else {
+                Node::Step(Box::new(edge.as_ref().clone()), Box::new(mutate_subtree(x_node, rng)))
+            }
+        }
+        // Phase 2 ternary operators
+        Node::Clamp(value, min, max) => {
+            match rng.gen_range(0..3) {
+                0 => Node::Clamp(Box::new(mutate_subtree(value, rng)), Box::new(min.as_ref().clone()), Box::new(max.as_ref().clone())),
+                1 => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(mutate_subtree(min, rng)), Box::new(max.as_ref().clone())),
+                _ => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(min.as_ref().clone()), Box::new(mutate_subtree(max, rng))),
+            }
+        }
+        // Radial (no children)
+        Node::Radial => Node::Radial,
     }
 }
 
@@ -183,6 +229,53 @@ fn replace_node(node: &Node, rng: &mut impl Rng) -> Node {
                 _ => Node::random(rng),
             }
         }
+        // Phase 2 unary operators
+        Node::Acos(child) => Node::Acos(Box::new(replace_node(child, rng))),
+        Node::Asin(child) => Node::Asin(Box::new(replace_node(child, rng))),
+        Node::Atan(child) => Node::Atan(Box::new(replace_node(child, rng))),
+        Node::Sinh(child) => Node::Sinh(Box::new(replace_node(child, rng))),
+        Node::Cosh(child) => Node::Cosh(Box::new(replace_node(child, rng))),
+        Node::Tanh(child) => Node::Tanh(Box::new(replace_node(child, rng))),
+        Node::Sign(child) => Node::Sign(Box::new(replace_node(child, rng))),
+        Node::Floor(child) => Node::Floor(Box::new(replace_node(child, rng))),
+        Node::Ceil(child) => Node::Ceil(Box::new(replace_node(child, rng))),
+        Node::Round(child) => Node::Round(Box::new(replace_node(child, rng))),
+        Node::Negate(child) => Node::Negate(Box::new(replace_node(child, rng))),
+        Node::Reciprocal(child) => Node::Reciprocal(Box::new(replace_node(child, rng))),
+        Node::Invert(child) => Node::Invert(Box::new(replace_node(child, rng))),
+        // Phase 2 binary operators
+        Node::Min(left, right) => {
+            match rng.gen_range(0..3) {
+                0 => Node::Min(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
+                1 => Node::Min(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
+                _ => Node::random(rng),
+            }
+        }
+        Node::Max(left, right) => {
+            match rng.gen_range(0..3) {
+                0 => Node::Max(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
+                1 => Node::Max(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
+                _ => Node::random(rng),
+            }
+        }
+        Node::Step(edge, x_node) => {
+            match rng.gen_range(0..3) {
+                0 => Node::Step(Box::new(replace_node(edge, rng)), Box::new(x_node.as_ref().clone())),
+                1 => Node::Step(Box::new(edge.as_ref().clone()), Box::new(replace_node(x_node, rng))),
+                _ => Node::random(rng),
+            }
+        }
+        // Phase 2 ternary operators
+        Node::Clamp(value, min, max) => {
+            match rng.gen_range(0..4) {
+                0 => Node::Clamp(Box::new(replace_node(value, rng)), Box::new(min.as_ref().clone()), Box::new(max.as_ref().clone())),
+                1 => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(replace_node(min, rng)), Box::new(max.as_ref().clone())),
+                2 => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(min.as_ref().clone()), Box::new(replace_node(max, rng))),
+                _ => Node::random(rng),
+            }
+        }
+        // Radial (no children)
+        Node::Radial => Node::Radial,
     }
 }
 
@@ -372,6 +465,154 @@ fn instructions_to_tree(instructions: &[Instruction]) -> Node {
                         stack.push(Some(Node::Dot(Box::new(left), Box::new(right))));
                     }
                 }
+            }
+            // Phase 2 unary operators
+            OpCode::Acos => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Acos(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Asin => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Asin(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Atan => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Atan(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Sinh => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Sinh(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Cosh => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Cosh(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Tanh => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Tanh(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Sign => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Sign(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Floor => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Floor(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Ceil => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Ceil(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Round => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Round(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Negate => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Negate(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Reciprocal => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Reciprocal(Box::new(child))));
+                    }
+                }
+            }
+            OpCode::Invert => {
+                let idx = instr.a as usize;
+                if idx < stack.len() {
+                    if let Some(child) = stack[idx].clone() {
+                        stack.push(Some(Node::Invert(Box::new(child))));
+                    }
+                }
+            }
+            // Phase 2 binary operators
+            OpCode::Min => {
+                let a = instr.a as usize;
+                let b = instr.b as usize;
+                if a < stack.len() && b < stack.len() {
+                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
+                        stack.push(Some(Node::Min(Box::new(left), Box::new(right))));
+                    }
+                }
+            }
+            OpCode::Max => {
+                let a = instr.a as usize;
+                let b = instr.b as usize;
+                if a < stack.len() && b < stack.len() {
+                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
+                        stack.push(Some(Node::Max(Box::new(left), Box::new(right))));
+                    }
+                }
+            }
+            OpCode::Step => {
+                let a = instr.a as usize;
+                let b = instr.b as usize;
+                if a < stack.len() && b < stack.len() {
+                    if let (Some(edge), Some(x_node)) = (stack[a].clone(), stack[b].clone()) {
+                        stack.push(Some(Node::Step(Box::new(edge), Box::new(x_node))));
+                    }
+                }
+            }
+            // Phase 2 ternary operators
+            OpCode::Clamp => {
+                let a = instr.a as usize;
+                let b = instr.b as usize;
+                let c = instr.c as usize;
+                if a < stack.len() && b < stack.len() && c < stack.len() {
+                    if let (Some(value), Some(min), Some(max)) = (stack[a].clone(), stack[b].clone(), stack[c].clone()) {
+                        stack.push(Some(Node::Clamp(Box::new(value), Box::new(min), Box::new(max))));
+                    }
+                }
+            }
+            // Radial (no operands)
+            OpCode::Radial => {
+                stack.push(Some(Node::Radial));
             }
         }
     }
