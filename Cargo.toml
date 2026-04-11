@@ -7,18 +7,13 @@ edition = "2021"
 name = "galapagos3"
 path = "src/main.rs"
 
-[[bin]]
-name = "test_gpu"
-path = "src/bin/test_gpu.rs"
-
 [dependencies]
 rand = "0.8"
 image = "0.24"
-minifb = "0.27"
-wgpu = "0.19"
+wgpu = { version = "29.0.1", default-features = false, features = ["std", "wgsl", "vulkan", "metal", "dx12"] }
 bytemuck = { version = "1.16", features = ["derive"] }
-futures-channel = "0.3"
 tokio = { version = "1", features = ["full"] }
+eframe = { version = "0.34", features = ["wgpu"] }
 
 [profile.dev]
 opt-level = 1

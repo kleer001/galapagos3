@@ -51,16 +51,24 @@ const OP_NEGATE: u32 = 33;
 const OP_STEP: u32 = 34;
 const OP_RECIPROCAL: u32 = 35;
 const OP_INVERT: u32 = 36;
-const OP_RADIAL: u32 = 37;
+// Phase 3 operators
+const OP_VALUE_NOISE: u32 = 37;
+const OP_FBM: u32 = 38;
+const OP_WARP_X: u32 = 39;
+const OP_WARP_Y: u32 = 40;
+const OP_MIRROR_X: u32 = 41;
+const OP_MIRROR_Y: u32 = 42;
 
-// Maximum stack depth for interpreter
-const MAX_STACK: u32 = 64;
-// Instructions per genome
-const INSTRUCTIONS_PER_GENOME: u32 = 64;
+// Maximum stack depth for interpreter (auto-generated from config.rs)
+const MAX_STACK: u32 = 256;
+// Instructions per genome (auto-generated from config.rs)
+const INSTRUCTIONS_PER_GENOME: u32 = 256;
 
 struct OutputInfo {
     width: u32,
     height: u32,
+    tile_w: u32,
+    tile_h: u32,
 };
 
 // Flat storage buffer of all instructions
@@ -71,7 +79,74 @@ var<storage> all_instructions: array<Instruction>;
 var<uniform> output_info: OutputInfo;
 
 @group(0) @binding(2)
+var<storage> palettes: array<u32>;
+
+@group(0) @binding(3)
 var<storage, read_write> output: array<vec4<f32>>;
+
+// Apply palette to HSV values
+fn apply_palette(palette_type: u32, h: f32, s: f32, v: f32) -> vec3<f32> {
+    var eff_h = h;
+    var eff_s = s;
+
+    switch (palette_type) {
+        case 0u { // RawHsv
+            eff_s = clamp(s, 0.1, 1.0);
+        }
+        case 1u { // Monochromatic
+            eff_h = 0.6;
+            eff_s = clamp(s * 0.5, 0.1, 1.0);
+        }
+        case 2u { // Analogous
+            let spread = s * 0.15;
+            eff_h = fract(h + spread);
+            eff_s = clamp(s, 0.3, 1.0);
+        }
+        case 3u { // Complementary
+            let toggle = select(0.0, 0.5, s > 0.5);
+            eff_h = fract(h + toggle);
+            eff_s = clamp(s, 0.3, 1.0);
+        }
+        case 4u { // SplitComplementary
+            var offset: f32 = 0.0;
+            if (s < 0.33) { offset = 0.0; }
+            else if (s < 0.66) { offset = 0.38; }
+            else { offset = 0.62; }
+            eff_h = fract(h + offset);
+            eff_s = clamp(s, 0.3, 1.0);
+        }
+        case 5u { // Triadic
+            var band = u32(floor(s * 3.0));
+            var offset: f32 = 0.0;
+            if (band == 0u) { offset = 0.0; }
+            else if (band == 1u) { offset = 0.333; }
+            else { offset = 0.666; }
+            eff_h = fract(h + offset);
+            eff_s = clamp(s, 0.3, 1.0);
+        }
+        case 6u { // Ocean - blues and teals
+            eff_h = 0.5 + h * 0.17;
+            eff_s = clamp(s, 0.4, 1.0);
+        }
+        case 7u { // Fire - reds, oranges, yellows
+            eff_h = h * 0.15;
+            eff_s = clamp(s, 0.5, 1.0);
+        }
+        case 8u { // Forest - greens and browns
+            eff_h = 0.2 + h * 0.15;
+            eff_s = clamp(s, 0.3, 0.8);
+        }
+        case 9u { // Sunset - warm gradient
+            eff_h = h * 0.12;
+            eff_s = clamp(s, 0.4, 1.0);
+        }
+        default {
+            eff_s = clamp(s, 0.1, 1.0);
+        }
+    }
+
+    return vec3<f32>(eff_h, eff_s, v);
+}
 
 // HSV to RGB conversion
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> vec3<f32> {
@@ -100,7 +175,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> vec3<f32> {
 
 // Bytecode interpreter - evaluates a genome at given coordinates
 fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
-    var stack: array<f32, 64>;
+    var stack: array<f32, MAX_STACK>;
     var sp: u32 = 0u;
 
     // Find the last non-Const instruction
@@ -312,8 +387,74 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
                 if (idx < sp) { result = 1.0 - stack[idx]; }
                 else { result = 0.0; }
             }
-            case OP_RADIAL {
-                result = sqrt(nx * nx + ny * ny);
+            // Phase 3 operators
+            case OP_VALUE_NOISE {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) {
+                    let vx = stack[a_idx];
+                    let vy = stack[b_idx];
+                    let xi = floor(vx);
+                    let yi = floor(vy);
+                    let fx = vx - xi;
+                    let fy = vy - yi;
+                    let fa = sin(xi * 127.1 + yi * 311.3);
+                    let fb = sin((xi + 1.0) * 127.1 + yi * 311.3);
+                    let fc = sin(xi * 127.1 + (yi + 1.0) * 311.3);
+                    let fd = sin((xi + 1.0) * 127.1 + (yi + 1.0) * 311.3);
+                    let top = mix(fa, fb, fx);
+                    let bottom = mix(fc, fd, fx);
+                    result = mix(top, bottom, fy);
+                } else { result = 0.0; }
+            }
+            case OP_FBM {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                let octaves = i32(instr.c);
+                if (a_idx < sp && b_idx < sp) {
+                    var value: f32 = 0.0;
+                    var amplitude: f32 = 1.0;
+                    var frequency: f32 = 1.0;
+                    var max_val: f32 = 0.0;
+                    for (var o: i32 = 0; o < max(1, min(8, octaves)); o += 1) {
+                        let vx = stack[a_idx] * frequency;
+                        let vy = stack[b_idx] * frequency;
+                        let xi = floor(vx);
+                        let yi = floor(vy);
+                        let fx = vx - xi;
+                        let fy = vy - yi;
+                        let fa = sin(xi * 127.1 + yi * 311.3);
+                        let fb = sin((xi + 1.0) * 127.1 + yi * 311.3);
+                        let fc = sin(xi * 127.1 + (yi + 1.0) * 311.3);
+                        let fd = sin((xi + 1.0) * 127.1 + (yi + 1.0) * 311.3);
+                        let top = mix(fa, fb, fx);
+                        let bottom = mix(fc, fd, fx);
+                        let noise = mix(top, bottom, fy);
+                        value += noise * amplitude;
+                        max_val += amplitude;
+                        amplitude *= 0.5;
+                        frequency *= 2.0;
+                    }
+                    if (max_val > 0.0) { result = value / max_val; } else { result = 0.0; }
+                } else { result = 0.0; }
+            }
+            case OP_WARP_X {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) { result = stack[a_idx] + stack[b_idx]; }
+                else { result = 0.0; }
+            }
+            case OP_WARP_Y {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) { result = stack[a_idx] + stack[b_idx]; }
+                else { result = 0.0; }
+            }
+            case OP_MIRROR_X {
+                result = abs(nx);
+            }
+            case OP_MIRROR_Y {
+                result = abs(ny);
             }
             default { result = 0.0; }
         }
@@ -332,23 +473,21 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let tile_w = 256u;
-    let tile_h = 256u;
-    let grid_cols = 4u;
-
     // Check if we're in bounds
     if (global_id.x >= output_info.width || global_id.y >= output_info.height) {
         return;
     }
 
-    // Calculate which tile and position within tile
+    // Calculate which tile and position within tile using dynamic dimensions
+    let tile_w = output_info.tile_w;
+    let tile_h = output_info.tile_h;
     let tile_x = global_id.x / tile_w;
     let tile_y = global_id.y / tile_h;
     let local_x = global_id.x % tile_w;
     let local_y = global_id.y % tile_h;
 
-    // Tile index in grid
-    let tile_idx = tile_y * grid_cols + tile_x;
+    // Tile index in grid (grid_cols = 4)
+    let tile_idx = tile_y * 4u + tile_x;
 
     // Individual index (0-15)
     let ind_idx = tile_idx;
@@ -367,8 +506,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let s = evaluate(s_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
     let v = evaluate(v_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
 
+    // Apply palette (palette index matches individual index)
+    let palette_type = palettes[ind_idx];
+    let hsv = apply_palette(palette_type, h, s, v);
+
     // Convert to RGB and output
-    let rgb = hsv_to_rgb(h, s, v);
+    let rgb = hsv_to_rgb(hsv.x, hsv.y, hsv.z);
     let out_idx = global_id.y * output_info.width + global_id.x;
     output[out_idx] = vec4<f32>(rgb, 1.0);
 }

@@ -1,3 +1,4 @@
+use crate::config;
 use rand::Rng;
 
 /// Typed expression tree nodes per ROADMAP.md function set
@@ -78,24 +79,37 @@ pub enum Node {
     Reciprocal(Box<Node>),
     /// Invert(child) - 1.0 - x
     Invert(Box<Node>),
-    /// Radial() - distance from center (0,0)
-    Radial,
+    // Phase 3: Noise functions (critical upgrade per ROADMAP.md)
+    /// ValueNoise(x, y) - simple value noise
+    ValueNoise(Box<Node>, Box<Node>),
+    /// FBM(x, y, octaves) - fractal brownian motion
+    FBM(Box<Node>, Box<Node>, i32),
+    // Phase 3: Domain warping (HUGE impact per ROADMAP.md)
+    /// WarpX(base_x, warp_amount) - x + warp(x,y)
+    WarpX(Box<Node>, Box<Node>),
+    /// WarpY(base_y, warp_amount) - y + warp(x,y)
+    WarpY(Box<Node>, Box<Node>),
+    // Phase 3: Symmetry operators
+    /// MirrorX() - |x| for bilateral symmetry
+    MirrorX,
+    /// MirrorY() - |y| for bilateral symmetry
+    MirrorY,
 }
-
-const MAX_TREE_DEPTH: usize = 6;
-const MIN_TREE_SIZE: usize = 3;
-const MAX_TREE_SIZE: usize = 15;
 
 impl Node {
     pub fn random(rng: &mut impl Rng) -> Self {
-        Self::random_bounded(rng, MAX_TREE_DEPTH, MAX_TREE_SIZE)
+        Self::random_with_depth(rng, config::MAX_TREE_DEPTH)
+    }
+
+    pub fn random_with_depth(rng: &mut impl Rng, max_depth: usize) -> Self {
+        Self::random_bounded(rng, max_depth, config::MAX_TREE_SIZE)
     }
 
     fn random_bounded(rng: &mut impl Rng, max_depth: usize, max_size: usize) -> Self {
         let current_depth = 0;
         let remaining_budget = max_size;
 
-        if remaining_budget < MIN_TREE_SIZE || current_depth >= max_depth {
+        if remaining_budget < config::MIN_TREE_SIZE || current_depth >= max_depth {
             // Terminal node: always X or Y (guarantees coordinate dependency)
             match rng.gen_range(0..2) {
                 0 => Node::X,
@@ -182,9 +196,34 @@ impl Node {
                             _ => Node::Clamp(a, b, c),
                         }
                     }
-                    // Radial (no arguments)
-                    37..=44 => Node::Radial,
-                    _ => Node::Radial, // Fallback for any out-of-range values
+                    // MirrorX/MirrorY (no arguments)
+                    37..=38 => match op {
+                        37 => Node::MirrorX,
+                        _ => Node::MirrorY,
+                    },
+                    // ValueNoise (binary)
+                    39..=40 => {
+                        let x_node = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        let y_node = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        Node::ValueNoise(x_node, y_node)
+                    }
+                    // FBM (binary with const octaves)
+                    41..=42 => {
+                        let x_node = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        let y_node = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        let octaves = rng.gen_range(1..=6);
+                        Node::FBM(x_node, y_node, octaves)
+                    }
+                    // WarpX/WarpY (binary)
+                    43..=44 => {
+                        let base = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        let warp = Box::new(Self::random_bounded(rng, current_depth + 1, remaining_budget - 2));
+                        match op {
+                            43 => Node::WarpX(base, warp),
+                            _ => Node::WarpY(base, warp),
+                        }
+                    }
+                    _ => Node::MirrorX, // Fallback for any out-of-range values
                 }
             }
         }
@@ -274,7 +313,72 @@ impl Node {
                 if v.abs() > 1e-6 { 1.0 / v } else { 0.0 }
             }
             Node::Invert(child) => 1.0 - child.eval(x, y),
-            Node::Radial => (x * x + y * y).sqrt(),
+            // Phase 3: Noise functions
+            Node::ValueNoise(x_node, y_node) => {
+                let vx = x_node.eval(x, y);
+                let vy = y_node.eval(x, y);
+                let xi = vx.floor();
+                let yi = vy.floor();
+                let fx = vx - xi;
+                let fy = vy - yi;
+                let hash = |ix: f32, iy: f32| -> f32 {
+                    let h = (ix * 127.1 + iy * 311.3).sin().cos();
+                    (h + 1.0) * 0.5
+                };
+                let fx_smooth = fx * fx * (3.0 - 2.0 * fx);
+                let fy_smooth = fy * fy * (3.0 - 2.0 * fy);
+                let v00 = hash(xi, yi);
+                let v10 = hash(xi + 1.0, yi);
+                let v01 = hash(xi, yi + 1.0);
+                let v11 = hash(xi + 1.0, yi + 1.0);
+                let x0 = v00 + (v10 - v00) * fx_smooth;
+                let x1 = v01 + (v11 - v01) * fx_smooth;
+                x0 + (x1 - x0) * fy_smooth
+            }
+            Node::FBM(x_node, y_node, octaves) => {
+                let mut result = 0.0;
+                let mut amplitude = 1.0;
+                let mut frequency = 1.0;
+                let mut max_val = 0.0;
+                for _ in 0..*octaves {
+                    let vx = x_node.eval(x, y) * frequency;
+                    let vy = y_node.eval(x, y) * frequency;
+                    let xi = vx.floor();
+                    let yi = vy.floor();
+                    let fx = vx - xi;
+                    let fy = vy - yi;
+                    let hash = |ix: f32, iy: f32| -> f32 {
+                        let h = (ix * 127.1 + iy * 311.3).sin().cos();
+                        (h + 1.0) * 0.5
+                    };
+                    let fx_smooth = fx * fx * (3.0 - 2.0 * fx);
+                    let fy_smooth = fy * fy * (3.0 - 2.0 * fy);
+                    let v00 = hash(xi, yi);
+                    let v10 = hash(xi + 1.0, yi);
+                    let v01 = hash(xi, yi + 1.0);
+                    let v11 = hash(xi + 1.0, yi + 1.0);
+                    let x0 = v00 + (v10 - v00) * fx_smooth;
+                    let x1 = v01 + (v11 - v01) * fx_smooth;
+                    let noise = x0 + (x1 - x0) * fy_smooth;
+                    result += noise * amplitude;
+                    max_val += amplitude;
+                    amplitude *= 0.5;
+                    frequency *= 2.0;
+                }
+                if max_val > 0.0 { result / max_val } else { 0.0 }
+            }
+            Node::WarpX(x_node, warp_node) => {
+                let base_x = x_node.eval(x, y);
+                let warp_amount = warp_node.eval(x, y);
+                base_x + warp_amount
+            }
+            Node::WarpY(y_node, warp_node) => {
+                let base_y = y_node.eval(x, y);
+                let warp_amount = warp_node.eval(x, y);
+                base_y + warp_amount
+            }
+            Node::MirrorX => x.abs(),
+            Node::MirrorY => y.abs(),
         }
     }
 }

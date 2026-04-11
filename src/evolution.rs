@@ -1,3 +1,4 @@
+use crate::config;
 use crate::genome::{Genome, Instruction, OpCode, Node};
 use rand::Rng;
 
@@ -5,158 +6,164 @@ use rand::Rng;
 // EVOLUTION PARAMETERS
 // ============================================================================
 
-/// 90% fine-tuning (mutate_subtree preserves structure), 10% disruptive (replace_node).
-pub const SUBTREE_MUTATION_PROB: f64 = 0.999;
+pub const DEFAULT_SUBTREE_MUTATION_PROB: f64 = config::SUBTREE_MUTATION_PROB;
+pub const DEFAULT_SUBTREE_STOP_PROB: f64 = config::SUBTREE_STOP_PROB;
+pub const DEFAULT_BINARY_CHILD_SIDE_PROB: f64 = config::BINARY_CHILD_SIDE_PROB;
+pub const DEFAULT_FRESH_RANDOM_COUNT: usize = config::FRESH_RANDOM_COUNT;
+pub const DEFAULT_MAX_TREE_DEPTH: usize = config::MAX_TREE_DEPTH;
 
-/// At each interior node in mutate_subtree, probability of stopping recursion early.
-/// Limits how many nodes change per mutation call (~1-2 constants per call at 0.3).
-pub const SUBTREE_STOP_PROB: f64 = 0.01;
+/// Runtime evolution parameters (can be modified during execution)
+#[derive(Clone, Copy)]
+pub struct EvolutionParams {
+    pub subtree_mutation_prob: f64,
+    pub subtree_stop_prob: f64,
+    pub binary_child_side_prob: f64,
+}
 
-/// In mutate_subtree at a binary node: which child to recurse into (left vs right).
-/// Does NOT control whether mutation happens — SUBTREE_STOP_PROB handles that.
-pub const BINARY_CHILD_SIDE_PROB: f64 = 0.005;
-
-
-/// Range for randomised constant values.
-pub const CONST_MUTATION_RANGE: (f32, f32) = (-1.0, 1.0);
-
-/// Number of fresh-random individuals injected each generation.
-/// 2 out of 16 = 12.5% diversity injection.
-pub const FRESH_RANDOM_COUNT: usize = 1;
-
-// ============================================================================
+impl Default for EvolutionParams {
+    fn default() -> Self {
+        Self {
+            subtree_mutation_prob: DEFAULT_SUBTREE_MUTATION_PROB,
+            subtree_stop_prob: DEFAULT_SUBTREE_STOP_PROB,
+            binary_child_side_prob: DEFAULT_BINARY_CHILD_SIDE_PROB,
+        }
+    }
+}
 
 pub fn mutate(genome: &Genome, rng: &mut impl Rng) -> Genome {
+    mutate_with_params(genome, rng, &EvolutionParams::default())
+}
+
+pub fn mutate_with_params(genome: &Genome, rng: &mut impl Rng, params: &EvolutionParams) -> Genome {
     let mut tree = genome.tree();
-    if rng.gen_bool(SUBTREE_MUTATION_PROB) {
-        // 90%: fine-tuning — changes 1-2 constants, preserves structure
-        tree = mutate_subtree(&tree, rng);
+    if rng.gen_bool(params.subtree_mutation_prob) {
+        tree = mutate_subtree_with_params(&tree, rng, params);
     } else {
-        // 10%: more disruptive — can replace whole subtrees
         tree = replace_node(&tree, rng);
     }
     Genome::new(tree)
 }
 
-fn mutate_subtree(node: &Node, rng: &mut impl Rng) -> Node {
-    // 30% chance to stop recursion here — keeps ~1-2 nodes changed per call
-    if rng.gen_bool(SUBTREE_STOP_PROB) {
+// ============================================================================
+// Mutation helpers — reduce boilerplate in mutate_subtree_with_params
+// ============================================================================
+
+fn mutate_unary<F: Fn(Box<Node>) -> Node>(
+    c: &Box<Node>, rng: &mut impl Rng, params: &EvolutionParams, ctor: F,
+) -> Node {
+    ctor(Box::new(mutate_subtree_with_params(c.as_ref(), rng, params)))
+}
+
+/// Recurse into left or right child based on binary_child_side_prob.
+fn mutate_binary<F: Fn(Box<Node>, Box<Node>) -> Node>(
+    l: &Box<Node>, r: &Box<Node>, rng: &mut impl Rng, params: &EvolutionParams, ctor: F,
+) -> Node {
+    if rng.gen_bool(params.binary_child_side_prob) {
+        ctor(Box::new(mutate_subtree_with_params(l.as_ref(), rng, params)), r.clone())
+    } else {
+        ctor(l.clone(), Box::new(mutate_subtree_with_params(r.as_ref(), rng, params)))
+    }
+}
+
+/// Recurse into one of three children, chosen uniformly.
+fn mutate_ternary<F: Fn(Box<Node>, Box<Node>, Box<Node>) -> Node>(
+    a: &Box<Node>, b: &Box<Node>, c: &Box<Node>, rng: &mut impl Rng, params: &EvolutionParams, ctor: F,
+) -> Node {
+    match rng.gen_range(0..3) {
+        0 => ctor(Box::new(mutate_subtree_with_params(a.as_ref(), rng, params)), b.clone(), c.clone()),
+        1 => ctor(a.clone(), Box::new(mutate_subtree_with_params(b.as_ref(), rng, params)), c.clone()),
+        _ => ctor(a.clone(), b.clone(), Box::new(mutate_subtree_with_params(c.as_ref(), rng, params))),
+    }
+}
+
+fn mutate_subtree_with_params(node: &Node, rng: &mut impl Rng, params: &EvolutionParams) -> Node {
+    // Stop recursion with given probability — keeps ~1-2 nodes changed per call
+    if rng.gen_bool(params.subtree_stop_prob) {
         return node.clone();
     }
     match node {
         Node::X | Node::Y => node.clone(),
-        Node::Const(_) => Node::Const(rng.gen_range(CONST_MUTATION_RANGE.0..CONST_MUTATION_RANGE.1)),
-        Node::Sin(child) => Node::Sin(Box::new(mutate_subtree(child, rng))),
-        Node::Cos(child) => Node::Cos(Box::new(mutate_subtree(child, rng))),
-        Node::Tan(child) => Node::Tan(Box::new(mutate_subtree(child, rng))),
-        Node::Abs(child) => Node::Abs(Box::new(mutate_subtree(child, rng))),
-        Node::Sqrt(child) => Node::Sqrt(Box::new(mutate_subtree(child, rng))),
-        Node::Log(child) => Node::Log(Box::new(mutate_subtree(child, rng))),
-        Node::Exp(child) => Node::Exp(Box::new(mutate_subtree(child, rng))),
-        Node::Fract(child) => Node::Fract(Box::new(mutate_subtree(child, rng))),
-        Node::Add(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Add(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Add(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        Node::Sub(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Sub(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Sub(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        Node::Mul(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Mul(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Mul(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        Node::Div(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Div(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Div(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        Node::Pow(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Pow(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Pow(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        Node::Mix(low, high, t) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Mix(Box::new(mutate_subtree(low, rng)), Box::new(high.as_ref().clone()), Box::new(t.as_ref().clone()))
-            } else {
-                Node::Mix(Box::new(low.as_ref().clone()), Box::new(mutate_subtree(high, rng)), Box::new(t.as_ref().clone()))
-            }
-        }
-        Node::Smoothstep(edge0, edge1, x) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Smoothstep(Box::new(mutate_subtree(edge0, rng)), Box::new(edge1.as_ref().clone()), Box::new(x.as_ref().clone())),
-                1 => Node::Smoothstep(Box::new(edge0.as_ref().clone()), Box::new(mutate_subtree(edge1, rng)), Box::new(x.as_ref().clone())),
-                _ => Node::Smoothstep(Box::new(edge0.as_ref().clone()), Box::new(edge1.as_ref().clone()), Box::new(mutate_subtree(x, rng))),
-            }
-        }
-        Node::Length(child) => Node::Length(Box::new(mutate_subtree(child, rng))),
-        Node::Dot(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Dot(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Dot(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        // Phase 2 unary operators
-        Node::Acos(child) => Node::Acos(Box::new(mutate_subtree(child, rng))),
-        Node::Asin(child) => Node::Asin(Box::new(mutate_subtree(child, rng))),
-        Node::Atan(child) => Node::Atan(Box::new(mutate_subtree(child, rng))),
-        Node::Sinh(child) => Node::Sinh(Box::new(mutate_subtree(child, rng))),
-        Node::Cosh(child) => Node::Cosh(Box::new(mutate_subtree(child, rng))),
-        Node::Tanh(child) => Node::Tanh(Box::new(mutate_subtree(child, rng))),
-        Node::Sign(child) => Node::Sign(Box::new(mutate_subtree(child, rng))),
-        Node::Floor(child) => Node::Floor(Box::new(mutate_subtree(child, rng))),
-        Node::Ceil(child) => Node::Ceil(Box::new(mutate_subtree(child, rng))),
-        Node::Round(child) => Node::Round(Box::new(mutate_subtree(child, rng))),
-        Node::Negate(child) => Node::Negate(Box::new(mutate_subtree(child, rng))),
-        Node::Reciprocal(child) => Node::Reciprocal(Box::new(mutate_subtree(child, rng))),
-        Node::Invert(child) => Node::Invert(Box::new(mutate_subtree(child, rng))),
-        // Phase 2 binary operators
-        Node::Min(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Min(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Min(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        Node::Max(left, right) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Max(Box::new(mutate_subtree(left, rng)), Box::new(right.as_ref().clone()))
-            } else {
-                Node::Max(Box::new(left.as_ref().clone()), Box::new(mutate_subtree(right, rng)))
-            }
-        }
-        Node::Step(edge, x_node) => {
-            if rng.gen_bool(BINARY_CHILD_SIDE_PROB) {
-                Node::Step(Box::new(mutate_subtree(edge, rng)), Box::new(x_node.as_ref().clone()))
-            } else {
-                Node::Step(Box::new(edge.as_ref().clone()), Box::new(mutate_subtree(x_node, rng)))
-            }
-        }
-        // Phase 2 ternary operators
-        Node::Clamp(value, min, max) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Clamp(Box::new(mutate_subtree(value, rng)), Box::new(min.as_ref().clone()), Box::new(max.as_ref().clone())),
-                1 => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(mutate_subtree(min, rng)), Box::new(max.as_ref().clone())),
-                _ => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(min.as_ref().clone()), Box::new(mutate_subtree(max, rng))),
-            }
-        }
-        // Radial (no children)
-        Node::Radial => Node::Radial,
+        Node::Const(_) => Node::Const(rng.gen::<f32>()),
+        // Unary operators
+        Node::Sin(c)        => mutate_unary(c, rng, params, Node::Sin),
+        Node::Cos(c)        => mutate_unary(c, rng, params, Node::Cos),
+        Node::Tan(c)        => mutate_unary(c, rng, params, Node::Tan),
+        Node::Abs(c)        => mutate_unary(c, rng, params, Node::Abs),
+        Node::Sqrt(c)       => mutate_unary(c, rng, params, Node::Sqrt),
+        Node::Log(c)        => mutate_unary(c, rng, params, Node::Log),
+        Node::Exp(c)        => mutate_unary(c, rng, params, Node::Exp),
+        Node::Fract(c)      => mutate_unary(c, rng, params, Node::Fract),
+        Node::Length(c)     => mutate_unary(c, rng, params, Node::Length),
+        Node::Acos(c)       => mutate_unary(c, rng, params, Node::Acos),
+        Node::Asin(c)       => mutate_unary(c, rng, params, Node::Asin),
+        Node::Atan(c)       => mutate_unary(c, rng, params, Node::Atan),
+        Node::Sinh(c)       => mutate_unary(c, rng, params, Node::Sinh),
+        Node::Cosh(c)       => mutate_unary(c, rng, params, Node::Cosh),
+        Node::Tanh(c)       => mutate_unary(c, rng, params, Node::Tanh),
+        Node::Sign(c)       => mutate_unary(c, rng, params, Node::Sign),
+        Node::Floor(c)      => mutate_unary(c, rng, params, Node::Floor),
+        Node::Ceil(c)       => mutate_unary(c, rng, params, Node::Ceil),
+        Node::Round(c)      => mutate_unary(c, rng, params, Node::Round),
+        Node::Negate(c)     => mutate_unary(c, rng, params, Node::Negate),
+        Node::Reciprocal(c) => mutate_unary(c, rng, params, Node::Reciprocal),
+        Node::Invert(c)     => mutate_unary(c, rng, params, Node::Invert),
+        // Binary operators
+        Node::Add(l, r)        => mutate_binary(l, r, rng, params, Node::Add),
+        Node::Sub(l, r)        => mutate_binary(l, r, rng, params, Node::Sub),
+        Node::Mul(l, r)        => mutate_binary(l, r, rng, params, Node::Mul),
+        Node::Div(l, r)        => mutate_binary(l, r, rng, params, Node::Div),
+        Node::Pow(l, r)        => mutate_binary(l, r, rng, params, Node::Pow),
+        Node::Dot(l, r)        => mutate_binary(l, r, rng, params, Node::Dot),
+        Node::Min(l, r)        => mutate_binary(l, r, rng, params, Node::Min),
+        Node::Max(l, r)        => mutate_binary(l, r, rng, params, Node::Max),
+        Node::Step(l, r)       => mutate_binary(l, r, rng, params, Node::Step),
+        Node::ValueNoise(l, r) => mutate_binary(l, r, rng, params, Node::ValueNoise),
+        Node::WarpX(l, r)      => mutate_binary(l, r, rng, params, Node::WarpX),
+        Node::WarpY(l, r)      => mutate_binary(l, r, rng, params, Node::WarpY),
+        // Ternary operators
+        Node::Smoothstep(e0, e1, x) => mutate_ternary(e0, e1, x, rng, params, Node::Smoothstep),
+        Node::Clamp(v, lo, hi)      => mutate_ternary(v, lo, hi, rng, params, Node::Clamp),
+        // Mix: intentionally only mutates low/high, never t (preserves blend control)
+        Node::Mix(low, high, t) => mutate_binary(low, high, rng, params, |l, r| Node::Mix(l, r, t.clone())),
+        // FBM: third field is octave count (i32), not a child node
+        Node::FBM(x, y, octaves) => match rng.gen_range(0..3) {
+            0 => Node::FBM(Box::new(mutate_subtree_with_params(x.as_ref(), rng, params)), y.clone(), *octaves),
+            1 => Node::FBM(x.clone(), Box::new(mutate_subtree_with_params(y.as_ref(), rng, params)), *octaves),
+            _ => Node::FBM(x.clone(), y.clone(), rng.gen_range(1..=8)),
+        },
+        Node::MirrorX => Node::MirrorX,
+        Node::MirrorY => Node::MirrorY,
+    }
+}
+
+// ============================================================================
+// Replace helpers — reduce boilerplate in replace_node
+// ============================================================================
+
+fn replace_unary<F: Fn(Box<Node>) -> Node>(c: &Box<Node>, rng: &mut impl Rng, ctor: F) -> Node {
+    ctor(Box::new(replace_node(c.as_ref(), rng)))
+}
+
+/// Recurse into left, right, or replace whole node (1/3 chance each).
+fn replace_binary<F: Fn(Box<Node>, Box<Node>) -> Node>(
+    l: &Box<Node>, r: &Box<Node>, rng: &mut impl Rng, ctor: F,
+) -> Node {
+    match rng.gen_range(0..3) {
+        0 => ctor(Box::new(replace_node(l.as_ref(), rng)), r.clone()),
+        1 => ctor(l.clone(), Box::new(replace_node(r.as_ref(), rng))),
+        _ => Node::random(rng),
+    }
+}
+
+/// Recurse into one of three children, or replace whole node (1/4 chance).
+fn replace_ternary<F: Fn(Box<Node>, Box<Node>, Box<Node>) -> Node>(
+    a: &Box<Node>, b: &Box<Node>, c: &Box<Node>, rng: &mut impl Rng, ctor: F,
+) -> Node {
+    match rng.gen_range(0..4) {
+        0 => ctor(Box::new(replace_node(a.as_ref(), rng)), b.clone(), c.clone()),
+        1 => ctor(a.clone(), Box::new(replace_node(b.as_ref(), rng)), c.clone()),
+        2 => ctor(a.clone(), b.clone(), Box::new(replace_node(c.as_ref(), rng))),
+        _ => Node::random(rng),
     }
 }
 
@@ -164,126 +171,64 @@ fn replace_node(node: &Node, rng: &mut impl Rng) -> Node {
     match node {
         Node::X | Node::Y => node.clone(),
         Node::Const(_) => Node::random(rng),
-        Node::Sin(child) => Node::Sin(Box::new(replace_node(child, rng))),
-        Node::Cos(child) => Node::Cos(Box::new(replace_node(child, rng))),
-        Node::Tan(child) => Node::Tan(Box::new(replace_node(child, rng))),
-        Node::Abs(child) => Node::Abs(Box::new(replace_node(child, rng))),
-        Node::Sqrt(child) => Node::Sqrt(Box::new(replace_node(child, rng))),
-        Node::Log(child) => Node::Log(Box::new(replace_node(child, rng))),
-        Node::Exp(child) => Node::Exp(Box::new(replace_node(child, rng))),
-        Node::Fract(child) => Node::Fract(Box::new(replace_node(child, rng))),
-        Node::Add(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Add(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Add(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Sub(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Sub(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Sub(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Mul(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Mul(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Mul(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Div(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Div(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Div(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Pow(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Pow(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Pow(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Mix(low, high, t) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Mix(Box::new(replace_node(low, rng)), Box::new(high.as_ref().clone()), Box::new(t.as_ref().clone())),
-                1 => Node::Mix(Box::new(low.as_ref().clone()), Box::new(replace_node(high, rng)), Box::new(t.as_ref().clone())),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Smoothstep(edge0, edge1, x) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Smoothstep(Box::new(replace_node(edge0, rng)), Box::new(edge1.as_ref().clone()), Box::new(x.as_ref().clone())),
-                1 => Node::Smoothstep(Box::new(edge0.as_ref().clone()), Box::new(replace_node(edge1, rng)), Box::new(x.as_ref().clone())),
-                _ => Node::Smoothstep(Box::new(edge0.as_ref().clone()), Box::new(edge1.as_ref().clone()), Box::new(replace_node(x, rng))),
-            }
-        }
-        Node::Length(child) => Node::Length(Box::new(replace_node(child, rng))),
-        Node::Dot(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Dot(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Dot(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        // Phase 2 unary operators
-        Node::Acos(child) => Node::Acos(Box::new(replace_node(child, rng))),
-        Node::Asin(child) => Node::Asin(Box::new(replace_node(child, rng))),
-        Node::Atan(child) => Node::Atan(Box::new(replace_node(child, rng))),
-        Node::Sinh(child) => Node::Sinh(Box::new(replace_node(child, rng))),
-        Node::Cosh(child) => Node::Cosh(Box::new(replace_node(child, rng))),
-        Node::Tanh(child) => Node::Tanh(Box::new(replace_node(child, rng))),
-        Node::Sign(child) => Node::Sign(Box::new(replace_node(child, rng))),
-        Node::Floor(child) => Node::Floor(Box::new(replace_node(child, rng))),
-        Node::Ceil(child) => Node::Ceil(Box::new(replace_node(child, rng))),
-        Node::Round(child) => Node::Round(Box::new(replace_node(child, rng))),
-        Node::Negate(child) => Node::Negate(Box::new(replace_node(child, rng))),
-        Node::Reciprocal(child) => Node::Reciprocal(Box::new(replace_node(child, rng))),
-        Node::Invert(child) => Node::Invert(Box::new(replace_node(child, rng))),
-        // Phase 2 binary operators
-        Node::Min(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Min(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Min(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Max(left, right) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Max(Box::new(replace_node(left, rng)), Box::new(right.as_ref().clone())),
-                1 => Node::Max(Box::new(left.as_ref().clone()), Box::new(replace_node(right, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        Node::Step(edge, x_node) => {
-            match rng.gen_range(0..3) {
-                0 => Node::Step(Box::new(replace_node(edge, rng)), Box::new(x_node.as_ref().clone())),
-                1 => Node::Step(Box::new(edge.as_ref().clone()), Box::new(replace_node(x_node, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        // Phase 2 ternary operators
-        Node::Clamp(value, min, max) => {
-            match rng.gen_range(0..4) {
-                0 => Node::Clamp(Box::new(replace_node(value, rng)), Box::new(min.as_ref().clone()), Box::new(max.as_ref().clone())),
-                1 => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(replace_node(min, rng)), Box::new(max.as_ref().clone())),
-                2 => Node::Clamp(Box::new(value.as_ref().clone()), Box::new(min.as_ref().clone()), Box::new(replace_node(max, rng))),
-                _ => Node::random(rng),
-            }
-        }
-        // Radial (no children)
-        Node::Radial => Node::Radial,
+        // Unary operators
+        Node::Sin(c)        => replace_unary(c, rng, Node::Sin),
+        Node::Cos(c)        => replace_unary(c, rng, Node::Cos),
+        Node::Tan(c)        => replace_unary(c, rng, Node::Tan),
+        Node::Abs(c)        => replace_unary(c, rng, Node::Abs),
+        Node::Sqrt(c)       => replace_unary(c, rng, Node::Sqrt),
+        Node::Log(c)        => replace_unary(c, rng, Node::Log),
+        Node::Exp(c)        => replace_unary(c, rng, Node::Exp),
+        Node::Fract(c)      => replace_unary(c, rng, Node::Fract),
+        Node::Length(c)     => replace_unary(c, rng, Node::Length),
+        Node::Acos(c)       => replace_unary(c, rng, Node::Acos),
+        Node::Asin(c)       => replace_unary(c, rng, Node::Asin),
+        Node::Atan(c)       => replace_unary(c, rng, Node::Atan),
+        Node::Sinh(c)       => replace_unary(c, rng, Node::Sinh),
+        Node::Cosh(c)       => replace_unary(c, rng, Node::Cosh),
+        Node::Tanh(c)       => replace_unary(c, rng, Node::Tanh),
+        Node::Sign(c)       => replace_unary(c, rng, Node::Sign),
+        Node::Floor(c)      => replace_unary(c, rng, Node::Floor),
+        Node::Ceil(c)       => replace_unary(c, rng, Node::Ceil),
+        Node::Round(c)      => replace_unary(c, rng, Node::Round),
+        Node::Negate(c)     => replace_unary(c, rng, Node::Negate),
+        Node::Reciprocal(c) => replace_unary(c, rng, Node::Reciprocal),
+        Node::Invert(c)     => replace_unary(c, rng, Node::Invert),
+        // Binary operators
+        Node::Add(l, r)        => replace_binary(l, r, rng, Node::Add),
+        Node::Sub(l, r)        => replace_binary(l, r, rng, Node::Sub),
+        Node::Mul(l, r)        => replace_binary(l, r, rng, Node::Mul),
+        Node::Div(l, r)        => replace_binary(l, r, rng, Node::Div),
+        Node::Pow(l, r)        => replace_binary(l, r, rng, Node::Pow),
+        Node::Dot(l, r)        => replace_binary(l, r, rng, Node::Dot),
+        Node::Min(l, r)        => replace_binary(l, r, rng, Node::Min),
+        Node::Max(l, r)        => replace_binary(l, r, rng, Node::Max),
+        Node::Step(l, r)       => replace_binary(l, r, rng, Node::Step),
+        Node::ValueNoise(l, r) => replace_binary(l, r, rng, Node::ValueNoise),
+        Node::WarpX(l, r)      => replace_binary(l, r, rng, Node::WarpX),
+        Node::WarpY(l, r)      => replace_binary(l, r, rng, Node::WarpY),
+        // Ternary operators
+        Node::Smoothstep(e0, e1, x) => replace_ternary(e0, e1, x, rng, Node::Smoothstep),
+        Node::Clamp(v, lo, hi)      => replace_ternary(v, lo, hi, rng, Node::Clamp),
+        // Mix: intentionally only replaces low/high, never t
+        Node::Mix(low, high, t) => match rng.gen_range(0..3) {
+            0 => Node::Mix(Box::new(replace_node(low.as_ref(), rng)), high.clone(), t.clone()),
+            1 => Node::Mix(low.clone(), Box::new(replace_node(high.as_ref(), rng)), t.clone()),
+            _ => Node::random(rng),
+        },
+        // FBM: third field is octave count, not a child node
+        Node::FBM(x, y, octaves) => match rng.gen_range(0..3) {
+            0 => Node::FBM(Box::new(replace_node(x.as_ref(), rng)), y.clone(), *octaves),
+            1 => Node::FBM(x.clone(), Box::new(replace_node(y.as_ref(), rng)), *octaves),
+            _ => Node::random(rng),
+        },
+        Node::MirrorX => Node::random(rng),
+        Node::MirrorY => Node::random(rng),
     }
 }
 
-// NOTE: crossover_subtree currently ignores `b` entirely — it always returns a
-// structural copy of `a`. Result: crossover = random choice of one parent.
-// This is intentionally conservative (children == one parent, no mixing).
-// True subtree-swap crossover can be added later when visual exploration warrants it.
 pub fn crossover(a: &Genome, b: &Genome, rng: &mut impl Rng) -> Genome {
+    // NOTE: conservative crossover — result is one full parent, no subtree mixing.
     let tree = if rng.gen_bool(0.5) { a.tree() } else { b.tree() };
     Genome::new(tree)
 }
@@ -293,8 +238,7 @@ pub fn selection(population: &[Genome], rng: &mut impl Rng) -> Genome {
     if size == 1 {
         return population[0].clone();
     }
-    let idx = rng.gen_range(0..size);
-    population[idx].clone()
+    population[rng.gen_range(0..size)].clone()
 }
 
 impl Genome {
@@ -303,317 +247,99 @@ impl Genome {
     }
 }
 
+// ============================================================================
+// Stack push helpers — reduce boilerplate in instructions_to_tree
+// ============================================================================
+
+fn push_unary<F: Fn(Box<Node>) -> Node>(stack: &mut Vec<Option<Node>>, idx: usize, ctor: F) {
+    if idx < stack.len() {
+        if let Some(child) = stack[idx].clone() {
+            stack.push(Some(ctor(Box::new(child))));
+        }
+    }
+}
+
+fn push_binary<F: Fn(Box<Node>, Box<Node>) -> Node>(
+    stack: &mut Vec<Option<Node>>, a: usize, b: usize, ctor: F,
+) {
+    if a < stack.len() && b < stack.len() {
+        if let (Some(x), Some(y)) = (stack[a].clone(), stack[b].clone()) {
+            stack.push(Some(ctor(Box::new(x), Box::new(y))));
+        }
+    }
+}
+
+fn push_ternary<F: Fn(Box<Node>, Box<Node>, Box<Node>) -> Node>(
+    stack: &mut Vec<Option<Node>>, a: usize, b: usize, c: usize, ctor: F,
+) {
+    if a < stack.len() && b < stack.len() && c < stack.len() {
+        if let (Some(x), Some(y), Some(z)) = (stack[a].clone(), stack[b].clone(), stack[c].clone()) {
+            stack.push(Some(ctor(Box::new(x), Box::new(y), Box::new(z))));
+        }
+    }
+}
+
 fn instructions_to_tree(instructions: &[Instruction]) -> Node {
     let mut stack: Vec<Option<Node>> = Vec::new();
 
-    // Find the last non-Const instruction (end of real computation)
     let real_end = instructions.iter().rposition(|i| i.op != OpCode::Const).unwrap_or(0);
 
     for instr in &instructions[..=real_end] {
+        let (a, b, c) = (instr.a as usize, instr.b as usize, instr.c as usize);
         match instr.op {
-            OpCode::X => {
-                stack.push(Some(Node::X));
-            }
-            OpCode::Y => {
-                stack.push(Some(Node::Y));
-            }
-            OpCode::Const => {
-                stack.push(Some(Node::Const(instr.value)));
-            }
-            OpCode::Sin => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Sin(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Cos => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Cos(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Tan => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Tan(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Abs => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Abs(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Sqrt => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Sqrt(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Log => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Log(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Exp => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Exp(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Fract => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Fract(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Add => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
+            OpCode::X     => stack.push(Some(Node::X)),
+            OpCode::Y     => stack.push(Some(Node::Y)),
+            OpCode::Const => stack.push(Some(Node::Const(instr.value))),
+            // Unary operators
+            OpCode::Sin        => push_unary(&mut stack, a, Node::Sin),
+            OpCode::Cos        => push_unary(&mut stack, a, Node::Cos),
+            OpCode::Tan        => push_unary(&mut stack, a, Node::Tan),
+            OpCode::Abs        => push_unary(&mut stack, a, Node::Abs),
+            OpCode::Sqrt       => push_unary(&mut stack, a, Node::Sqrt),
+            OpCode::Log        => push_unary(&mut stack, a, Node::Log),
+            OpCode::Exp        => push_unary(&mut stack, a, Node::Exp),
+            OpCode::Fract      => push_unary(&mut stack, a, Node::Fract),
+            OpCode::Length     => push_unary(&mut stack, a, Node::Length),
+            OpCode::Acos       => push_unary(&mut stack, a, Node::Acos),
+            OpCode::Asin       => push_unary(&mut stack, a, Node::Asin),
+            OpCode::Atan       => push_unary(&mut stack, a, Node::Atan),
+            OpCode::Sinh       => push_unary(&mut stack, a, Node::Sinh),
+            OpCode::Cosh       => push_unary(&mut stack, a, Node::Cosh),
+            OpCode::Tanh       => push_unary(&mut stack, a, Node::Tanh),
+            OpCode::Sign       => push_unary(&mut stack, a, Node::Sign),
+            OpCode::Floor      => push_unary(&mut stack, a, Node::Floor),
+            OpCode::Ceil       => push_unary(&mut stack, a, Node::Ceil),
+            OpCode::Round      => push_unary(&mut stack, a, Node::Round),
+            OpCode::Negate     => push_unary(&mut stack, a, Node::Negate),
+            OpCode::Reciprocal => push_unary(&mut stack, a, Node::Reciprocal),
+            OpCode::Invert     => push_unary(&mut stack, a, Node::Invert),
+            // Binary operators
+            OpCode::Add        => push_binary(&mut stack, a, b, Node::Add),
+            OpCode::Sub        => push_binary(&mut stack, a, b, Node::Sub),
+            OpCode::Mul        => push_binary(&mut stack, a, b, Node::Mul),
+            OpCode::Div        => push_binary(&mut stack, a, b, Node::Div),
+            OpCode::Pow        => push_binary(&mut stack, a, b, Node::Pow),
+            OpCode::Dot        => push_binary(&mut stack, a, b, Node::Dot),
+            OpCode::Min        => push_binary(&mut stack, a, b, Node::Min),
+            OpCode::Max        => push_binary(&mut stack, a, b, Node::Max),
+            OpCode::Step       => push_binary(&mut stack, a, b, Node::Step),
+            OpCode::ValueNoise => push_binary(&mut stack, a, b, Node::ValueNoise),
+            OpCode::WarpX      => push_binary(&mut stack, a, b, Node::WarpX),
+            OpCode::WarpY      => push_binary(&mut stack, a, b, Node::WarpY),
+            // Ternary operators
+            OpCode::Mix        => push_ternary(&mut stack, a, b, c, Node::Mix),
+            OpCode::Smoothstep => push_ternary(&mut stack, a, b, c, Node::Smoothstep),
+            OpCode::Clamp      => push_ternary(&mut stack, a, b, c, Node::Clamp),
+            // FBM: third field is octave count stored in instr.c, not a stack index
+            OpCode::FBM => {
                 if a < stack.len() && b < stack.len() {
-                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Add(Box::new(left), Box::new(right))));
+                    if let (Some(x), Some(y)) = (stack[a].clone(), stack[b].clone()) {
+                        stack.push(Some(Node::FBM(Box::new(x), Box::new(y), instr.c)));
                     }
                 }
             }
-            OpCode::Sub => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Sub(Box::new(left), Box::new(right))));
-                    }
-                }
-            }
-            OpCode::Mul => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Mul(Box::new(left), Box::new(right))));
-                    }
-                }
-            }
-            OpCode::Div => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Div(Box::new(left), Box::new(right))));
-                    }
-                }
-            }
-            OpCode::Pow => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(base), Some(exp)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Pow(Box::new(base), Box::new(exp))));
-                    }
-                }
-            }
-            OpCode::Mix => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                let c = instr.c as usize;
-                if a < stack.len() && b < stack.len() && c < stack.len() {
-                    if let (Some(low), Some(high), Some(t)) = (stack[a].clone(), stack[b].clone(), stack[c].clone()) {
-                        stack.push(Some(Node::Mix(Box::new(low), Box::new(high), Box::new(t))));
-                    }
-                }
-            }
-            OpCode::Smoothstep => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                let c = instr.c as usize;
-                if a < stack.len() && b < stack.len() && c < stack.len() {
-                    if let (Some(edge0), Some(edge1), Some(x)) = (stack[a].clone(), stack[b].clone(), stack[c].clone()) {
-                        stack.push(Some(Node::Smoothstep(Box::new(edge0), Box::new(edge1), Box::new(x))));
-                    }
-                }
-            }
-            OpCode::Length => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Length(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Dot => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Dot(Box::new(left), Box::new(right))));
-                    }
-                }
-            }
-            // Phase 2 unary operators
-            OpCode::Acos => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Acos(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Asin => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Asin(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Atan => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Atan(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Sinh => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Sinh(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Cosh => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Cosh(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Tanh => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Tanh(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Sign => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Sign(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Floor => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Floor(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Ceil => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Ceil(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Round => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Round(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Negate => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Negate(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Reciprocal => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Reciprocal(Box::new(child))));
-                    }
-                }
-            }
-            OpCode::Invert => {
-                let idx = instr.a as usize;
-                if idx < stack.len() {
-                    if let Some(child) = stack[idx].clone() {
-                        stack.push(Some(Node::Invert(Box::new(child))));
-                    }
-                }
-            }
-            // Phase 2 binary operators
-            OpCode::Min => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Min(Box::new(left), Box::new(right))));
-                    }
-                }
-            }
-            OpCode::Max => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(left), Some(right)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Max(Box::new(left), Box::new(right))));
-                    }
-                }
-            }
-            OpCode::Step => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                if a < stack.len() && b < stack.len() {
-                    if let (Some(edge), Some(x_node)) = (stack[a].clone(), stack[b].clone()) {
-                        stack.push(Some(Node::Step(Box::new(edge), Box::new(x_node))));
-                    }
-                }
-            }
-            // Phase 2 ternary operators
-            OpCode::Clamp => {
-                let a = instr.a as usize;
-                let b = instr.b as usize;
-                let c = instr.c as usize;
-                if a < stack.len() && b < stack.len() && c < stack.len() {
-                    if let (Some(value), Some(min), Some(max)) = (stack[a].clone(), stack[b].clone(), stack[c].clone()) {
-                        stack.push(Some(Node::Clamp(Box::new(value), Box::new(min), Box::new(max))));
-                    }
-                }
-            }
-            // Radial (no operands)
-            OpCode::Radial => {
-                stack.push(Some(Node::Radial));
-            }
+            OpCode::MirrorX => stack.push(Some(Node::MirrorX)),
+            OpCode::MirrorY => stack.push(Some(Node::MirrorY)),
         }
     }
 

@@ -41,7 +41,13 @@ pub enum OpCode {
     Step = 34,
     Reciprocal = 35,
     Invert = 36,
-    Radial = 37,
+    // Phase 3 operators
+    ValueNoise = 37,
+    FBM = 38,
+    WarpX = 39,
+    WarpY = 40,
+    MirrorX = 41,
+    MirrorY = 42,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -53,7 +59,7 @@ pub struct Instruction {
     pub value: f32,
 }
 
-pub const MAX_INSTRUCTIONS: usize = 64;
+pub const MAX_INSTRUCTIONS: usize = 256;
 
 pub fn tree_to_instructions(tree: &Node) -> Vec<Instruction> {
     let mut stack = Vec::new();
@@ -270,9 +276,40 @@ pub fn tree_to_instructions(tree: &Node) -> Vec<Instruction> {
                 let child_idx = stack.len() as i32 - 1;
                 stack.push(Instruction { op: OpCode::Invert, a: child_idx, b: 0, c: 0, value: 0.0 });
             }
-            Node::Radial => {
-                // Radial computes sqrt(x*x + y*y) where x and y are the coordinates
-                stack.push(Instruction { op: OpCode::Radial, a: 0, b: 0, c: 0, value: 0.0 });
+            // Phase 3 operators
+            Node::ValueNoise(x_node, y_node) => {
+                emit(x_node, stack);
+                let x_idx = stack.len() as i32 - 1;
+                emit(y_node, stack);
+                let y_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::ValueNoise, a: x_idx, b: y_idx, c: 0, value: 0.0 });
+            }
+            Node::FBM(x_node, y_node, octaves) => {
+                emit(x_node, stack);
+                let x_idx = stack.len() as i32 - 1;
+                emit(y_node, stack);
+                let y_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::FBM, a: x_idx, b: y_idx, c: *octaves, value: 0.0 });
+            }
+            Node::WarpX(base_x, warp_amount) => {
+                emit(base_x, stack);
+                let base_idx = stack.len() as i32 - 1;
+                emit(warp_amount, stack);
+                let warp_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::WarpX, a: base_idx, b: warp_idx, c: 0, value: 0.0 });
+            }
+            Node::WarpY(base_y, warp_amount) => {
+                emit(base_y, stack);
+                let base_idx = stack.len() as i32 - 1;
+                emit(warp_amount, stack);
+                let warp_idx = stack.len() as i32 - 1;
+                stack.push(Instruction { op: OpCode::WarpY, a: base_idx, b: warp_idx, c: 0, value: 0.0 });
+            }
+            Node::MirrorX => {
+                stack.push(Instruction { op: OpCode::MirrorX, a: 0, b: 0, c: 0, value: 0.0 });
+            }
+            Node::MirrorY => {
+                stack.push(Instruction { op: OpCode::MirrorY, a: 0, b: 0, c: 0, value: 0.0 });
             }
         }
     }
@@ -592,8 +629,92 @@ impl Genome {
                         used += 1;
                     }
                 }
-                OpCode::Radial => {
-                    stack[used] = (x * x + y * y).sqrt();
+                // Phase 3 operators
+                OpCode::ValueNoise => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    if a < used && b < used {
+                        let vx = stack[a];
+                        let vy = stack[b];
+                        // Simple value noise: hash-based interpolation
+                        let xi = vx.floor();
+                        let yi = vy.floor();
+                        let fx = vx - xi;
+                        let fy = vy - yi;
+                        let hash = |ix: f32, iy: f32| -> f32 {
+                            let h = (ix * 127.1 + iy * 311.3).sin().cos();
+                            (h + 1.0) * 0.5
+                        };
+                        let fa = hash(xi, yi);
+                        let fb = hash(xi + 1.0, yi);
+                        let fc = hash(xi, yi + 1.0);
+                        let fd = hash(xi + 1.0, yi + 1.0);
+                        let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+                        let top = lerp(fa, fb, fx);
+                        let bottom = lerp(fc, fd, fx);
+                        stack[used] = lerp(top, bottom, fy);
+                        used += 1;
+                    }
+                }
+                OpCode::FBM => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    let octaves = instr.c as i32;
+                    if a < used && b < used {
+                        let mut value = 0.0;
+                        let mut amplitude = 1.0;
+                        let mut frequency = 1.0;
+                        let mut max_val = 0.0;
+                        for _ in 0..octaves.max(1).min(8) {
+                            let vx = stack[a] * frequency;
+                            let vy = stack[b] * frequency;
+                            let xi = vx.floor();
+                            let yi = vy.floor();
+                            let fx = vx - xi;
+                            let fy = vy - yi;
+                            let hash = |ix: f32, iy: f32| -> f32 {
+                                let h = (ix * 127.1 + iy * 311.3).sin().cos();
+                                (h + 1.0) * 0.5
+                            };
+                            let fa = hash(xi, yi);
+                            let fb = hash(xi + 1.0, yi);
+                            let fc = hash(xi, yi + 1.0);
+                            let fd = hash(xi + 1.0, yi + 1.0);
+                            let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+                            let top = lerp(fa, fb, fx);
+                            let bottom = lerp(fc, fd, fx);
+                            let noise = lerp(top, bottom, fy);
+                            value += noise * amplitude;
+                            max_val += amplitude;
+                            amplitude *= 0.5;
+                            frequency *= 2.0;
+                        }
+                        stack[used] = if max_val > 0.0 { value / max_val } else { 0.0 };
+                        used += 1;
+                    }
+                }
+                OpCode::WarpX => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    if a < used && b < used {
+                        stack[used] = stack[a] + stack[b];
+                        used += 1;
+                    }
+                }
+                OpCode::WarpY => {
+                    let a = instr.a as usize;
+                    let b = instr.b as usize;
+                    if a < used && b < used {
+                        stack[used] = stack[a] + stack[b];
+                        used += 1;
+                    }
+                }
+                OpCode::MirrorX => {
+                    stack[used] = x.abs();
+                    used += 1;
+                }
+                OpCode::MirrorY => {
+                    stack[used] = y.abs();
                     used += 1;
                 }
             }
