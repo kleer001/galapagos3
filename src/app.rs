@@ -1,6 +1,6 @@
 use galapagos3::config;
 use galapagos3::evolution;
-use galapagos3::genome::{Genome, Node, OpCode};
+use galapagos3::genome::{Genome, Node};
 use galapagos3::renderer::GpuRenderer;
 use eframe::egui;
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
@@ -30,9 +30,9 @@ impl Individual {
     }
 
     async fn render_tile_gpu(&self, renderer: &GpuRenderer) -> Result<Vec<u32>, galapagos3::renderer::RenderError> {
-        let h_raw: Vec<(u32, i32, i32, i32, f32)> = self.h.instructions.iter().map(|i| (op_to_u32(i.op), i.a, i.b, i.c, i.value)).collect();
-        let s_raw: Vec<(u32, i32, i32, i32, f32)> = self.s.instructions.iter().map(|i| (op_to_u32(i.op), i.a, i.b, i.c, i.value)).collect();
-        let v_raw: Vec<(u32, i32, i32, i32, f32)> = self.v.instructions.iter().map(|i| (op_to_u32(i.op), i.a, i.b, i.c, i.value)).collect();
+        let h_raw: Vec<(u32, i32, i32, i32, f32)> = self.h.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
+        let s_raw: Vec<(u32, i32, i32, i32, f32)> = self.s.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
+        let v_raw: Vec<(u32, i32, i32, i32, f32)> = self.v.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
 
         let palette_idx: u32 = match self.palette {
             PaletteType::RawHsv => 0,
@@ -140,27 +140,6 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
         3 => (p, q, v), 4 => (t, p, v), _ => (v, p, q),
     };
     [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
-}
-
-fn op_to_u32(op: OpCode) -> u32 {
-    match op {
-        OpCode::X => 0, OpCode::Y => 1, OpCode::Const => 2,
-        OpCode::Sin => 3, OpCode::Cos => 4, OpCode::Tan => 5,
-        OpCode::Abs => 6, OpCode::Sqrt => 7, OpCode::Log => 8,
-        OpCode::Exp => 9, OpCode::Fract => 10,
-        OpCode::Add => 11, OpCode::Sub => 12, OpCode::Mul => 13,
-        OpCode::Div => 14, OpCode::Pow => 15, OpCode::Mix => 16,
-        OpCode::Smoothstep => 17, OpCode::Length => 18, OpCode::Dot => 19,
-        OpCode::Acos => 20, OpCode::Asin => 21, OpCode::Atan => 22,
-        OpCode::Sinh => 23, OpCode::Cosh => 24, OpCode::Tanh => 25,
-        OpCode::Min => 26, OpCode::Max => 27, OpCode::Clamp => 28,
-        OpCode::Sign => 29, OpCode::Floor => 30, OpCode::Ceil => 31,
-        OpCode::Round => 32, OpCode::Negate => 33, OpCode::Step => 34,
-        OpCode::Reciprocal => 35, OpCode::Invert => 36,
-        OpCode::ValueNoise => 37, OpCode::FBM => 38,
-        OpCode::WarpX => 39, OpCode::WarpY => 40,
-        OpCode::MirrorX => 41, OpCode::MirrorY => 42,
-    }
 }
 
 // ============================================================================

@@ -14,7 +14,7 @@ use wgpu::util::DeviceExt;
 /// which matches the Instruction struct layout.
 pub fn instructions_to_gpu_raw(raw: &[(u32, i32, i32, i32, f32)]) -> [GpuInstruction; config::MAX_INSTRUCTIONS] {
     let default_instr = GpuInstruction {
-        op: OP_CONST,
+        op: OpCode::Const as u32,
         a: 0,
         b: 0,
         c: 0,
@@ -61,56 +61,6 @@ impl std::fmt::Display for RenderError {
 }
 
 impl Error for RenderError {}
-
-// ============================================================================
-// WGSL Opcode constants - MUST match Rust OpCode enum exactly
-// ============================================================================
-
-const OP_X: u32 = 0;
-const OP_Y: u32 = 1;
-const OP_CONST: u32 = 2;
-const OP_SIN: u32 = 3;
-const OP_COS: u32 = 4;
-const OP_TAN: u32 = 5;
-const OP_ABS: u32 = 6;
-const OP_SQRT: u32 = 7;
-const OP_LOG: u32 = 8;
-const OP_EXP: u32 = 9;
-const OP_FRACT: u32 = 10;
-const OP_ADD: u32 = 11;
-const OP_SUB: u32 = 12;
-const OP_MUL: u32 = 13;
-const OP_DIV: u32 = 14;
-const OP_POW: u32 = 15;
-const OP_MIX: u32 = 16;
-const OP_SMOOTHSTEP: u32 = 17;
-const OP_LENGTH: u32 = 18;
-const OP_DOT: u32 = 19;
-// Phase 2 operators
-const OP_ACOS: u32 = 20;
-const OP_ASIN: u32 = 21;
-const OP_ATAN: u32 = 22;
-const OP_SINH: u32 = 23;
-const OP_COSH: u32 = 24;
-const OP_TANH: u32 = 25;
-const OP_MIN: u32 = 26;
-const OP_MAX: u32 = 27;
-const OP_CLAMP: u32 = 28;
-const OP_SIGN: u32 = 29;
-const OP_FLOOR: u32 = 30;
-const OP_CEIL: u32 = 31;
-const OP_ROUND: u32 = 32;
-const OP_NEGATE: u32 = 33;
-const OP_STEP: u32 = 34;
-const OP_RECIPROCAL: u32 = 35;
-const OP_INVERT: u32 = 36;
-// Phase 3 operators
-const OP_VALUE_NOISE: u32 = 37;
-const OP_FBM: u32 = 38;
-const OP_WARP_X: u32 = 39;
-const OP_WARP_Y: u32 = 40;
-const OP_MIRROR_X: u32 = 41;
-const OP_MIRROR_Y: u32 = 42;
 
 // ============================================================================
 // GPU Data Structures (must be POD for wgpu uniform/storage buffers)
@@ -279,7 +229,7 @@ impl GpuRenderer {
     /// Convert instructions to GPU-compatible format
     pub fn instructions_to_gpu(instructions: &[crate::genome::Instruction]) -> [GpuInstruction; config::MAX_INSTRUCTIONS] {
         let default_instr = GpuInstruction {
-            op: OP_CONST,
+            op: OpCode::Const as u32,
             a: 0,
             b: 0,
             c: 0,
@@ -292,7 +242,7 @@ impl GpuRenderer {
 
         for (i, instr) in instructions.iter().take(config::MAX_INSTRUCTIONS).enumerate() {
             gpu_instrs[i] = GpuInstruction {
-                op: opcode_to_u32(instr.op),
+                op: instr.op as u32,
                 a: instr.a,
                 b: instr.b,
                 c: instr.c,
@@ -490,52 +440,3 @@ impl GpuRenderer {
     }
 }
 
-fn opcode_to_u32(op: OpCode) -> u32 {
-    match op {
-        OpCode::X => OP_X,
-        OpCode::Y => OP_Y,
-        OpCode::Const => OP_CONST,
-        OpCode::Sin => OP_SIN,
-        OpCode::Cos => OP_COS,
-        OpCode::Tan => OP_TAN,
-        OpCode::Abs => OP_ABS,
-        OpCode::Sqrt => OP_SQRT,
-        OpCode::Log => OP_LOG,
-        OpCode::Exp => OP_EXP,
-        OpCode::Fract => OP_FRACT,
-        OpCode::Add => OP_ADD,
-        OpCode::Sub => OP_SUB,
-        OpCode::Mul => OP_MUL,
-        OpCode::Div => OP_DIV,
-        OpCode::Pow => OP_POW,
-        OpCode::Mix => OP_MIX,
-        OpCode::Smoothstep => OP_SMOOTHSTEP,
-        OpCode::Length => OP_LENGTH,
-        OpCode::Dot => OP_DOT,
-        // Phase 2 operators
-        OpCode::Acos => OP_ACOS,
-        OpCode::Asin => OP_ASIN,
-        OpCode::Atan => OP_ATAN,
-        OpCode::Sinh => OP_SINH,
-        OpCode::Cosh => OP_COSH,
-        OpCode::Tanh => OP_TANH,
-        OpCode::Min => OP_MIN,
-        OpCode::Max => OP_MAX,
-        OpCode::Clamp => OP_CLAMP,
-        OpCode::Sign => OP_SIGN,
-        OpCode::Floor => OP_FLOOR,
-        OpCode::Ceil => OP_CEIL,
-        OpCode::Round => OP_ROUND,
-        OpCode::Negate => OP_NEGATE,
-        OpCode::Step => OP_STEP,
-        OpCode::Reciprocal => OP_RECIPROCAL,
-        OpCode::Invert => OP_INVERT,
-        // Phase 3 operators
-        OpCode::ValueNoise => OP_VALUE_NOISE,
-        OpCode::FBM => OP_FBM,
-        OpCode::WarpX => OP_WARP_X,
-        OpCode::WarpY => OP_WARP_Y,
-        OpCode::MirrorX => OP_MIRROR_X,
-        OpCode::MirrorY => OP_MIRROR_Y,
-    }
-}
