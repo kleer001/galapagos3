@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Galápagos · From Genome to Image</title>
+<style>
+:root {
+  --bg:      #f4f1ec;
+  --panel:   #ffffff;
+  --border:  #d8d4cc;
+  --text:    #282420;
+  --muted:   #8a8680;
+  --accent:  #3d3a36;
+  --green:   #2a6b2a;
+  --blue:    #1a5c8c;
+  --orange:  #b85c18;
+  --purple:  #5e3a8a;
+  --red:     #a02020;
+  --btn:     #eae6e0;
+  --btn-h:   #d8d3cb;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; line-height: 1.65; }
+
+/* ── Nav ─────────────────────────────────────────────────── */
+nav {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 2rem; padding: 0.75rem 2rem;
+  font-size: 0.875rem;
+}
+.logo { font-weight: 700; font-size: 1rem; color: var(--accent); letter-spacing: -0.02em; }
+nav a { text-decoration: none; color: var(--muted); transition: color 0.15s; }
+nav a:hover { color: var(--text); }
+
+/* ── Sections ────────────────────────────────────────────── */
+section { max-width: 960px; margin: 0 auto; padding: 3.5rem 2rem; border-bottom: 1px solid var(--border); }
+h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.4rem; color: var(--accent); }
+.section-sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; max-width: 640px; }
+
+/* ── Hero ────────────────────────────────────────────────── */
+#hero { border-bottom: 1px solid var(--border); text-align: center; padding: 4rem 2rem 3.5rem; max-width: 100%; }
+#hero h1 { font-size: 2.25rem; font-weight: 800; letter-spacing: -0.04em; color: var(--accent); margin-bottom: 0.75rem; }
+#hero p  { color: var(--muted); font-size: 1.05rem; max-width: 600px; margin: 0 auto; }
+
+/* ── Buttons ─────────────────────────────────────────────── */
+button {
+  padding: 0.5rem 1.25rem; border-radius: 6px; cursor: pointer;
+  background: var(--btn); color: var(--text); border: 1px solid var(--border);
+  font-size: 0.875rem; transition: background 0.15s, opacity 0.15s;
+}
+button:hover:not(:disabled) { background: var(--btn-h); }
+button:active { transform: scale(0.98); }
+button:disabled { opacity: 0.4; cursor: default; }
+.btn-primary { background: #3d3a36; color: #f4f1ec; border-color: #3d3a36; }
+.btn-primary:hover:not(:disabled) { background: #575350; }
+
+/* ── Section 1: Chips ────────────────────────────────────── */
+.chip-group { margin-bottom: 1.25rem; }
+.chip-group-label {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--muted); margin-bottom: 0.55rem;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip {
+  padding: 0.3rem 0.75rem; border-radius: 6px; font-family: monospace; font-size: 0.875rem;
+  cursor: pointer; border: 1.5px solid transparent; transition: all 0.12s; user-select: none;
+}
+.chip:hover { transform: translateY(-1px); }
+.chip.terminal { background: #d8eef4; color: var(--blue);   border-color: #a0c8dc; }
+.chip.unary    { background: #d8ecd8; color: var(--green);  border-color: #9cc49c; }
+.chip.binary   { background: #f4e2d0; color: var(--orange); border-color: #d4a87a; }
+.chip.ternary  { background: #e8d8f4; color: var(--purple); border-color: #b898d8; }
+.chip.active.terminal { background: var(--blue);   color: #fff; border-color: var(--blue); }
+.chip.active.unary    { background: var(--green);  color: #fff; border-color: var(--green); }
+.chip.active.binary   { background: var(--orange); color: #fff; border-color: var(--orange); }
+.chip.active.ternary  { background: var(--purple); color: #fff; border-color: var(--purple); }
+.chip-info {
+  margin-top: 1.25rem; padding: 0.85rem 1.1rem; background: var(--panel);
+  border-radius: 8px; border-left: 3px solid var(--accent);
+  font-size: 0.875rem; min-height: 52px; transition: border-color 0.2s;
+}
+.chip-info strong { font-family: monospace; }
+
+/* ── Section 2: Tree ─────────────────────────────────────── */
+.tree-controls { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.tree-controls label { font-size: 0.83rem; color: var(--muted); display: flex; align-items: center; gap: 0.5rem; }
+.tree-controls input[type=range] { width: 110px; accent-color: var(--accent); }
+.badge { font-size: 0.75rem; color: var(--muted); padding: 0.2rem 0.6rem; background: var(--panel); border-radius: 4px; border: 1px solid var(--border); }
+
+.tree-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.svg-wrap { height: 260px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.svg-wrap svg { width: 100%; height: 100%; }
+
+.expr-box {
+  margin-top: 0.75rem; padding: 0.7rem 1rem; background: #f0ece4;
+  border-radius: 6px; font-family: monospace; font-size: 0.8rem;
+  color: var(--green); word-break: break-all; min-height: 2.8rem;
+  border: 1px solid var(--border); line-height: 1.55;
+}
+
+/* ── Section 3: Image ────────────────────────────────────── */
+.row { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; margin-bottom: 2rem; }
+canvas { display: block; border-radius: 6px; border: 1px solid var(--border); image-rendering: pixelated; }
+.canvas-wrap { text-align: center; }
+.canvas-label { font-size: 0.72rem; color: var(--muted); margin-top: 0.4rem; font-family: monospace; }
+
+.explainer {
+  flex: 1; min-width: 200px; background: var(--panel); border-radius: 8px;
+  padding: 1.25rem; border: 1px solid var(--border); font-size: 0.875rem;
+}
+.explainer h3 { font-size: 0.9rem; color: var(--accent); margin-bottom: 1rem; }
+.step { display: flex; gap: 0.6rem; margin-bottom: 0.6rem; align-items: flex-start; }
+.step-n {
+  width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #14141e;
+  font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+}
+.step code { font-size: 0.78rem; color: var(--blue); font-family: monospace; }
+
+.channels-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem; }
+.channels-header h3 { font-size: 1rem; font-weight: 600; }
+
+/* ── Channel rows ─────────────────────────────────────────── */
+.ch-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.ch-item {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.75rem; display: flex; align-items: flex-start; gap: 1rem;
+}
+.ch-item.combined { border-color: #a09888; }
+.ch-meta { flex: 1; }
+.ch-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 0.35rem; font-weight: 600; }
+.ch-item.combined .ch-title { color: var(--accent); }
+.ch-expr { font-family: monospace; font-size: 0.75rem; color: var(--green); word-break: break-all; line-height: 1.55; }
+
+/* ── Remap subsection ─────────────────────────────────────── */
+.remap-section { margin: 2rem 0 1.5rem; padding: 1.25rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.remap-section h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; }
+.remap-section > p { font-size: 0.875rem; color: var(--muted); margin-bottom: 1.25rem; max-width: 640px; }
+.remap-diagram { display: flex; gap: 1rem; align-items: center; }
+.remap-input-col { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.remap-input-col canvas { border: 1px solid var(--border); border-radius: 3px; }
+.remap-input-label { font-size: 0.65rem; color: var(--muted); font-family: monospace; text-align: center; }
+.remap-curves-col { flex: 1; display: flex; flex-direction: column; gap: 0.55rem; min-width: 0; }
+.remap-curve-row { display: flex; align-items: center; gap: 0.5rem; }
+.remap-ch-label { font-size: 0.78rem; font-weight: 700; width: 18px; text-align: center; flex-shrink: 0; }
+.remap-h-label { color: var(--blue); }
+.remap-s-label { color: var(--green); }
+.remap-v-label { color: var(--orange); }
+.remap-curve-row { align-items: flex-start !important; }
+.remap-curve-stack { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; min-width: 0; }
+.remap-curve-stack canvas { width: 100%; border-radius: 3px; image-rendering: auto !important; }
+.remap-expr { font-family: monospace; font-size: 0.68rem; color: var(--green); word-break: break-all; line-height: 1.45; padding-top: 0.1rem; }
+
+/* ── HSV demo ─────────────────────────────────────────────── */
+.hsv-section { margin: 2rem 0 1.5rem; padding: 1.25rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.hsv-section h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.4rem; }
+.hsv-section > p { font-size: 0.875rem; color: var(--muted); margin-bottom: 1.25rem; max-width: 640px; }
+.hsv-demo { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; }
+.hsv-strips { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 0.85rem; }
+.hsv-strip-row { display: flex; flex-direction: column; gap: 0.2rem; }
+.hsv-strip-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.15rem; }
+.hsv-strip-header span:first-child { font-size: 0.78rem; font-weight: 700; color: var(--accent); width: 16px; }
+.hsv-strip-header span:last-child { font-size: 0.75rem; color: var(--muted); }
+.hsv-strip-row canvas { display: block; width: 100%; border-radius: 3px; border: 1px solid var(--border); image-rendering: auto !important; }
+.hsv-strip-row input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; cursor: pointer; }
+.hsv-result-col { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; flex-shrink: 0; padding-top: 0.25rem; }
+.hsv-result-col canvas { border: 1px solid var(--border); border-radius: 6px; }
+.hsv-value-text { font-family: monospace; font-size: 0.72rem; color: var(--muted); text-align: center; line-height: 1.6; }
+.hsv-descs { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.hsv-desc { font-size: 0.82rem; color: var(--muted); }
+.hsv-desc strong { color: var(--text); }
+
+/* ── Mutation controls ────────────────────────────────────── */
+.mut-controls {
+  padding: 1rem 1.25rem; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; margin-bottom: 1.5rem;
+}
+.mut-controls h3 { font-size: 0.85rem; font-weight: 600; margin-bottom: 1rem; }
+.mut-row { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
+.mut-field { display: flex; flex-direction: column; gap: 0.4rem; min-width: 180px; }
+.mut-field > label { font-size: 0.8rem; font-weight: 600; }
+.mut-field input[type=range] { width: 130px; accent-color: var(--accent); }
+.mut-desc { font-size: 0.75rem; color: var(--muted); line-height: 1.5; max-width: 230px; }
+.mut-toggle { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.mut-btn {
+  padding: 0.3rem 0.75rem; border-radius: 5px; cursor: pointer;
+  background: var(--btn); color: var(--muted); border: 1px solid var(--border);
+  font-size: 0.8rem; transition: all 0.12s;
+}
+.mut-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ── Section 4: Evolution ────────────────────────────────── */
+.evo-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.evo-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.evo-panel {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 1rem; flex: 1; min-width: 200px;
+}
+.evo-panel h3 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.75rem; }
+.evo-panel.child h3 { color: var(--accent); }
+.evo-svg-wrap { height: 180px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.evo-svg-wrap svg { width: 100%; height: 100%; }
+.evo-canvas-wrap { text-align: center; margin-top: 0.75rem; }
+
+/* ── Footer ──────────────────────────────────────────────── */
+footer { text-align: center; padding: 2.5rem; color: var(--muted); font-size: 0.8rem; }
+footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">Galápagos</span>
+  <a href="#s-blocks">Building Blocks</a>
+  <a href="#s-tree">Growing a Tree</a>
+  <a href="#s-image">Tree → Image</a>
+  <a href="#s-color">Coloring</a>
+  <a href="#s-evo">Evolution</a>
+</nav>
+
+<!-- ── Hero ─────────────────────────────────────────────── -->
+<div id="hero">
+  <h1>From Genome to Image</h1>
+  <p>Every image starts as a random math formula. You pick the ones worth keeping, and Galápagos breeds the next generation. Here's how that works.</p>
+</div>
+
+<!-- ── Section 1: Building Blocks ──────────────────────── -->
+<section id="s-blocks">
+  <h2>1 · Building Blocks</h2>
+  <p class="section-sub">Every formula is built from three kinds of pieces. Click any chip to learn what it does.</p>
+
+  <div class="chip-group">
+    <div class="chip-group-label">Terminals — leaves of the tree</div>
+    <div class="chips" id="chips-terminal"></div>
+  </div>
+  <div class="chip-group">
+    <div class="chip-group-label">Unary ops — one child</div>
+    <div class="chips" id="chips-unary"></div>
+  </div>
+  <div class="chip-group">
+    <div class="chip-group-label">Binary ops — two children</div>
+    <div class="chips" id="chips-binary"></div>
+  </div>
+  <div class="chip-group">
+    <div class="chip-group-label">Ternary ops — three children</div>
+    <div class="chips" id="chips-ternary"></div>
+  </div>
+
+  <div class="chip-info" id="chip-info">
+    Click a chip above to see its definition.
+  </div>
+</section>
+
+<!-- ── Section 2: Growing a Tree ────────────────────────── -->
+<section id="s-tree">
+  <h2>2 · Growing a Tree</h2>
+  <p class="section-sub">A genome grows by picking operations at random and chaining them into a tree, one node at a time.</p>
+
+  <div class="tree-controls">
+    <label>Max depth
+      <input type="range" id="depth-slider" min="1" max="6" value="4">
+      <span id="depth-val">4</span>
+    </label>
+    <button id="btn-roll" class="btn-primary" onclick="rollTree()">&#9654; Roll New Tree</button>
+    <span class="badge" id="node-badge">— nodes</span>
+  </div>
+
+  <div class="tree-box">
+    <div class="svg-wrap">
+      <svg id="tree-svg" preserveAspectRatio="xMidYMid meet">
+        <text x="50%" y="50%" text-anchor="middle" font-size="13" fill="#aaa8a0" font-family="system-ui">Click "Roll New Tree" to begin</text>
+      </svg>
+    </div>
+  </div>
+  <div class="expr-box" id="tree-expr">—</div>
+</section>
+
+<!-- ── Section 3: Tree → Image ──────────────────────────── -->
+<section id="s-image">
+  <h2>3 · Tree → Image</h2>
+  <p class="section-sub">To draw a pixel, the tree runs once with that pixel's coordinates as input. The answer becomes a color.</p>
+
+  <div class="row">
+    <div class="canvas-wrap">
+      <canvas id="canvas-main" width="320" height="240"></canvas>
+      <div class="canvas-label">Expression from §2 · grayscale</div>
+    </div>
+    <div class="explainer">
+      <h3>How each pixel is computed</h3>
+      <div class="step"><div class="step-n">1</div><div>Map pixel <code>(px, py)</code> → <code>x, y ∈ [−1, 1]</code></div></div>
+      <div class="step"><div class="step-n">2</div><div>Evaluate every node in the tree using those coordinates</div></div>
+      <div class="step"><div class="step-n">3</div><div>Normalize the output: <code>(sin(v) + 1) / 2 → [0, 1]</code></div></div>
+      <div class="step"><div class="step-n">4</div><div>Assign the value to the pixel: <code>gray = v × 255</code></div></div>
+      <div class="step"><div class="step-n">5</div><div>In Galápagos, three trees drive <code>H</code>, <code>S</code>, <code>V</code> — see §4</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Section 4: Coloring ──────────────────────────────── -->
+<section id="s-color">
+  <h2>4 · Coloring</h2>
+  <p class="section-sub">Three separate trees control the hue, saturation, and brightness of every pixel. A remap tree then fine-tunes each channel's range before the final color is set.</p>
+
+  <div class="hsv-section">
+    <h3>The HSV Color Model</h3>
+    <p>Each pixel is colored by three numbers. Drag the sliders to explore each dimension — the swatch shows the combined result.</p>
+    <div class="hsv-demo">
+      <div class="hsv-strips">
+        <div class="hsv-strip-row">
+          <div class="hsv-strip-header"><span>H</span><span>Hue — which color on the spectrum</span></div>
+          <canvas id="hsv-h-strip" width="400" height="26"></canvas>
+          <input type="range" id="hsv-h" min="0" max="100" value="55" oninput="updateHSV()">
+        </div>
+        <div class="hsv-strip-row">
+          <div class="hsv-strip-header"><span>S</span><span>Saturation — grey (0) to vivid (1)</span></div>
+          <canvas id="hsv-s-strip" width="400" height="26"></canvas>
+          <input type="range" id="hsv-s" min="0" max="100" value="80" oninput="updateHSV()">
+        </div>
+        <div class="hsv-strip-row">
+          <div class="hsv-strip-header"><span>V</span><span>Value — black (0) to full brightness (1)</span></div>
+          <canvas id="hsv-v-strip" width="400" height="26"></canvas>
+          <input type="range" id="hsv-v" min="0" max="100" value="90" oninput="updateHSV()">
+        </div>
+      </div>
+      <div class="hsv-result-col">
+        <canvas id="hsv-result" width="110" height="110"></canvas>
+        <div class="hsv-value-text" id="hsv-values">H=0.55<br>S=0.80<br>V=0.90</div>
+      </div>
+    </div>
+    <div class="hsv-descs">
+      <div class="hsv-desc"><strong>Hue</strong> — the color angle: 0=red · 0.17=yellow · 0.33=green · 0.5=cyan · 0.67=blue · 0.83=magenta · 1=red again.</div>
+      <div class="hsv-desc"><strong>Saturation</strong> — how vivid the color is: 0 is pure grey, 1 is fully saturated.</div>
+      <div class="hsv-desc"><strong>Value</strong> — brightness: 0 is black no matter the hue, 1 is full brightness.</div>
+    </div>
+  </div>
+
+  <div class="remap-section">
+    <h3>Channel Remapping</h3>
+    <p>The spatial tree outputs a number at each pixel. A separate remap tree intercepts that number and bends the range before it becomes a color. The colored bar shows what the remap produces; the curve shows how input maps to output; the dashed diagonal is identity (no change).</p>
+    <div class="remap-diagram">
+      <div class="remap-curves-col">
+        <div class="remap-curve-row">
+          <span class="remap-ch-label remap-h-label">H</span>
+          <div class="remap-curve-stack">
+            <canvas id="remap-h-out" width="250" height="18"></canvas>
+            <canvas id="remap-h-curve" width="250" height="50"></canvas>
+            <div class="remap-expr" id="remap-expr-h">—</div>
+          </div>
+        </div>
+        <div class="remap-curve-row">
+          <span class="remap-ch-label remap-s-label">S</span>
+          <div class="remap-curve-stack">
+            <canvas id="remap-s-out" width="250" height="18"></canvas>
+            <canvas id="remap-s-curve" width="250" height="50"></canvas>
+            <div class="remap-expr" id="remap-expr-s">—</div>
+          </div>
+        </div>
+        <div class="remap-curve-row">
+          <span class="remap-ch-label remap-v-label">V</span>
+          <div class="remap-curve-stack">
+            <canvas id="remap-v-out" width="250" height="18"></canvas>
+            <canvas id="remap-v-curve" width="250" height="50"></canvas>
+            <div class="remap-expr" id="remap-expr-v">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:0.85rem">
+      <button onclick="rollRemaps()">&#8635; New remap curves</button>
+    </div>
+  </div>
+
+  <div class="channels-header">
+    <h3>Three channels, one image</h3>
+    <button onclick="rerollChannels()">&#8635; Re-roll channels</button>
+  </div>
+  <div class="ch-list">
+    <div class="ch-item">
+      <canvas id="canvas-h" width="160" height="120"></canvas>
+      <div class="ch-meta">
+        <div class="ch-title">H — Hue</div>
+        <div class="ch-expr" id="expr-h">—</div>
+      </div>
+    </div>
+    <div class="ch-item">
+      <canvas id="canvas-s" width="160" height="120"></canvas>
+      <div class="ch-meta">
+        <div class="ch-title">S — Saturation</div>
+        <div class="ch-expr" id="expr-s">—</div>
+      </div>
+    </div>
+    <div class="ch-item">
+      <canvas id="canvas-v" width="160" height="120"></canvas>
+      <div class="ch-meta">
+        <div class="ch-title">V — Value</div>
+        <div class="ch-expr" id="expr-v">—</div>
+      </div>
+    </div>
+    <div class="ch-item combined">
+      <canvas id="canvas-combined" width="160" height="120"></canvas>
+      <div class="ch-meta">
+        <div class="ch-title">Combined HSV → RGB</div>
+        <div class="ch-expr">All three channels combined into one full-color image.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Section 5: Evolution ──────────────────────────────── -->
+<section id="s-evo">
+  <h2>5 · Evolution</h2>
+  <p class="section-sub">Crossover stitches a branch from one parent into another. Mutation replaces a random branch with something new.</p>
+
+  <div class="mut-controls">
+    <h3>Settings — applied to both Crossover and Mutate</h3>
+    <div class="mut-row">
+      <div class="mut-field">
+        <label>Mode</label>
+        <div class="mut-toggle">
+          <button class="mut-btn active" id="mut-btn-replace"   onclick="setMutMode('replace')">Replace subtree</button>
+          <button class="mut-btn"        id="mut-btn-finetune"  onclick="setMutMode('finetune')">Fine-tune constants</button>
+        </div>
+        <div class="mut-desc" id="mut-mode-desc">Replaces a random subtree with a freshly grown one. Used by both Crossover and Mutate.</div>
+      </div>
+      <div class="mut-field" id="mut-depth-field">
+        <label>Tree depth: <span id="mut-depth-val">2</span></label>
+        <input type="range" id="mut-depth" min="1" max="5" value="2"
+               oninput="document.getElementById('mut-depth-val').textContent=this.value">
+        <div class="mut-desc">How deep the new subtree grows. 1 = one node, 5 = a full branch.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="evo-controls">
+    <button id="btn-crossover" onclick="doCrossover()">&#x2717; Crossover</button>
+    <button id="btn-mutate"    onclick="doMutate()">&#8627; Mutate Parent A</button>
+    <button onclick="rerollEvo()">&#8635; New parents</button>
+  </div>
+
+  <div class="evo-row">
+    <div class="evo-panel" id="evo-a">
+      <h3>Parent A</h3>
+      <div class="evo-svg-wrap"><svg id="evo-svg-a" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="evo-canvas-wrap"><canvas id="evo-canvas-a" width="200" height="150"></canvas></div>
+    </div>
+    <div class="evo-panel" id="evo-b">
+      <h3>Parent B</h3>
+      <div class="evo-svg-wrap"><svg id="evo-svg-b" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="evo-canvas-wrap"><canvas id="evo-canvas-b" width="200" height="150"></canvas></div>
+    </div>
+    <div class="evo-panel child" id="evo-child">
+      <h3>Child</h3>
+      <div class="evo-svg-wrap"><svg id="evo-svg-child" preserveAspectRatio="xMidYMid meet">
+        <text x="50%" y="50%" text-anchor="middle" font-size="12" fill="#aaa8a0" font-family="system-ui">Press Crossover or Mutate</text>
+      </svg></div>
+      <div class="evo-canvas-wrap"><canvas id="evo-canvas-child" width="200" height="150"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>Galápagos 3.0 — Evolutionary Art Generator &nbsp;·&nbsp; <a href="https://github.com/kleer001/galapagos3">GitHub</a></p>
+</footer>
+
+<script>
+// ─── Operator Registry ────────────────────────────────────────────────────────
+
+const OPS = [
+  { id:'x',          arity:0, group:'terminal', label:'x',      desc:'Pixel x-coordinate, normalized to −1 (left) … +1 (right).' },
+  { id:'y',          arity:0, group:'terminal', label:'y',      desc:'Pixel y-coordinate, normalized to −1 (top) … +1 (bottom).' },
+  { id:'const',      arity:0, group:'terminal', label:'#',      desc:'A constant value sampled randomly at genome birth, e.g. 1.37 or −0.82.' },
+  { id:'sin',        arity:1, group:'unary',    label:'sin',    desc:'sin(π · a) — smooth oscillation between −1 and +1.' },
+  { id:'cos',        arity:1, group:'unary',    label:'cos',    desc:'cos(π · a) — same period as sin, shifted by a quarter cycle.' },
+  { id:'abs',        arity:1, group:'unary',    label:'|a|',    desc:'Absolute value: folds the negative half up, creating bilateral symmetry.' },
+  { id:'sqrt',       arity:1, group:'unary',    label:'√a',     desc:'√|a| — compresses large values, spreads small ones.' },
+  { id:'fract',      arity:1, group:'unary',    label:'fract',  desc:'a − ⌊a⌋ — keeps only the fractional part, tiling the real line into [0, 1).' },
+  { id:'negate',     arity:1, group:'unary',    label:'−a',     desc:'Negate: flips sign. Inverts bright ↔ dark when used on a channel.' },
+  { id:'add',        arity:2, group:'binary',   label:'+',      desc:'a + b — superimposes two patterns.' },
+  { id:'sub',        arity:2, group:'binary',   label:'−',      desc:'a − b — takes the difference, highlighting edges between patterns.' },
+  { id:'mul',        arity:2, group:'binary',   label:'×',      desc:'a × b — multiplies patterns; near-zero areas suppress the other.' },
+  { id:'div',        arity:2, group:'binary',   label:'÷',      desc:'a / b — diverges near b=0; clamped to 0 in the evaluator.' },
+  { id:'mod',        arity:2, group:'binary',   label:'mod',    desc:'a mod b — creates uniform stripes or a grid, depending on inputs.' },
+  { id:'min',        arity:2, group:'binary',   label:'min',    desc:'min(a, b) — keeps the darker of two patterns.' },
+  { id:'max',        arity:2, group:'binary',   label:'max',    desc:'max(a, b) — keeps the brighter of two patterns.' },
+  { id:'pow',        arity:2, group:'binary',   label:'aᵇ',     desc:'|a|^b — exponentiation sharpens or softens gradients.' },
+  { id:'mix',        arity:3, group:'ternary',  label:'mix',    desc:'Lerp: a·(1−t) + b·t. Blends two patterns using a third as the mix weight.' },
+  { id:'smoothstep', arity:3, group:'ternary',  label:'smooth', desc:'Smooth Hermite interpolation from 0 to 1 as t moves from a to b.' },
+];
+
+const BY_ID = Object.fromEntries(OPS.map(o => [o.id, o]));
+const TERMINALS = OPS.filter(o => o.arity === 0);
+const UNARY     = OPS.filter(o => o.arity === 1);
+const BINARY    = OPS.filter(o => o.arity === 2);
+const TERNARY   = OPS.filter(o => o.arity === 3);
+const NON_TERM  = OPS.filter(o => o.arity > 0);
+
+// ─── Node ─────────────────────────────────────────────────────────────────────
+
+let _nodeId = 0;
+class Node {
+  constructor(op, children = [], value = 0) {
+    this.op = op;
+    this.children = children;
+    this.value = value;
+    this.id = _nodeId++;
+  }
+  clone() {
+    return new Node(this.op, this.children.map(c => c.clone()), this.value);
+  }
+}
+
+// ─── Tree Generation ──────────────────────────────────────────────────────────
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function rnd(a, b) { return a + Math.random() * (b - a); }
+
+function randomTerminal() {
+  if (Math.random() < 0.38) return new Node('const', [], rnd(-2, 2));
+  return new Node(Math.random() < 0.5 ? 'x' : 'y');
+}
+
+function randomTree(maxDepth) {
+  if (maxDepth <= 0 || Math.random() < 0.12) return randomTerminal();
+  const r = Math.random();
+  if (r < 0.28) {
+    return new Node(pick(UNARY).id, [randomTree(maxDepth - 1)]);
+  } else if (r < 0.85) {
+    return new Node(pick(BINARY).id, [randomTree(maxDepth - 1), randomTree(maxDepth - 1)]);
+  } else {
+    return new Node(pick(TERNARY).id, [randomTree(maxDepth - 1), randomTree(maxDepth - 1), randomTree(maxDepth - 1)]);
+  }
+}
+
+// ─── Evaluation ───────────────────────────────────────────────────────────────
+
+function evalTree(node, x, y) {
+  if (!node) return 0;
+  const [a, b, t] = node.children.map(c => evalTree(c, x, y));
+  switch (node.op) {
+    case 'x':     return x;
+    case 'y':     return y;
+    case 'const': return node.value;
+    case 'sin':   return Math.sin(Math.PI * a);
+    case 'cos':   return Math.cos(Math.PI * a);
+    case 'abs':   return Math.abs(a);
+    case 'sqrt':  return Math.sqrt(Math.abs(a));
+    case 'fract': return a - Math.floor(a);
+    case 'negate':return -a;
+    case 'add':   return a + b;
+    case 'sub':   return a - b;
+    case 'mul':   return a * b;
+    case 'div':   return Math.abs(b) < 1e-6 ? 0 : a / b;
+    case 'mod':   return Math.abs(b) < 1e-6 ? 0 : a - b * Math.floor(a / b);
+    case 'min':   return Math.min(a, b);
+    case 'max':   return Math.max(a, b);
+    case 'pow':   return Math.pow(Math.abs(a), Math.min(Math.abs(b), 8));
+    case 'mix':   return a * (1 - (t || 0)) + b * (t || 0);
+    case 'smoothstep': {
+      const tt = Math.max(0, Math.min(1, ((t || 0) - a) / ((b - a) || 1e-6)));
+      return tt * tt * (3 - 2 * tt);
+    }
+    default: return 0;
+  }
+}
+
+function toExpr(node) {
+  if (!node) return '?';
+  if (node.op === 'const') return node.value.toFixed(2);
+  if (node.children.length === 0) return node.op;
+  return `${node.op}(${node.children.map(toExpr).join(', ')})`;
+}
+
+function normalize(v) { return (Math.sin(v) + 1) * 0.5; }
+
+function hsv2rgb(h, s, v) {
+  h = ((h % 1) + 1) % 1;
+  s = Math.max(0, Math.min(1, s));
+  v = Math.max(0, Math.min(1, v));
+  const i = Math.floor(h * 6), f = h * 6 - i;
+  const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+  switch (i % 6) {
+    case 0: return [v, t, p]; case 1: return [q, v, p]; case 2: return [p, v, t];
+    case 3: return [p, q, v]; case 4: return [t, p, v]; case 5: return [v, p, q];
+  }
+  return [0, 0, 0];
+}
+
+// ─── Canvas Rendering ─────────────────────────────────────────────────────────
+
+function renderGray(canvas, tree) {
+  if (!tree) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const img = ctx.createImageData(W, H);
+  for (let py = 0; py < H; py++) {
+    const y = (py / H) * 2 - 1;
+    for (let px = 0; px < W; px++) {
+      const x = (px / W) * 2 - 1;
+      const c = Math.floor(normalize(evalTree(tree, x, y)) * 255);
+      const i = (py * W + px) * 4;
+      img.data[i] = img.data[i+1] = img.data[i+2] = c;
+      img.data[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function renderHSV(canvas, hT, sT, vT) {
+  if (!hT || !sT || !vT) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const img = ctx.createImageData(W, H);
+  for (let py = 0; py < H; py++) {
+    const y = (py / H) * 2 - 1;
+    for (let px = 0; px < W; px++) {
+      const x = (px / W) * 2 - 1;
+      const [r, g, b] = hsv2rgb(
+        normalize(evalTree(hT, x, y)),
+        normalize(evalTree(sT, x, y)),
+        normalize(evalTree(vT, x, y))
+      );
+      const i = (py * W + px) * 4;
+      img.data[i]   = r * 255 | 0;
+      img.data[i+1] = g * 255 | 0;
+      img.data[i+2] = b * 255 | 0;
+      img.data[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function clearCanvas(canvas) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#e4e0d8';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// ─── SVG Tree Layout & Rendering ─────────────────────────────────────────────
+
+const NODE_R  = 24;
+const LEVEL_H = 70;
+const LEAF_W  = 56;
+
+function computeLayout(root) {
+  let leaf = 0;
+  function lay(n, depth) {
+    if (n.children.length === 0) {
+      n._x = leaf * LEAF_W; n._y = depth * LEVEL_H; leaf++;
+    } else {
+      n.children.forEach(c => lay(c, depth + 1));
+      const xs = n.children.map(c => c._x);
+      n._x = (Math.min(...xs) + Math.max(...xs)) / 2;
+      n._y = depth * LEVEL_H;
+    }
+  }
+  lay(root, 0);
+}
+
+const GROUP_COLOR = { terminal:'#1a5c8c', unary:'#2a6b2a', binary:'#b85c18', ternary:'#5e3a8a' };
+const EVO_A_COLOR = '#1a5c8c';  // blue  — Parent A origin
+const EVO_B_COLOR = '#a02020';  // red   — Parent B origin
+
+function nodeColor(op) { return GROUP_COLOR[BY_ID[op]?.group] || '#888'; }
+
+function nodeLabel(node) {
+  if (node.op === 'const') return node.value.toFixed(1);
+  return BY_ID[node.op]?.label || node.op;
+}
+
+function bfsOrder(root) {
+  const q = [root], out = [];
+  while (q.length) { const n = q.shift(); out.push(n); n.children.forEach(c => q.push(c)); }
+  return out;
+}
+
+function allNodes(root) { return bfsOrder(root); }
+
+function subtreeIds(node) {
+  const ids = new Set([node.id]);
+  node.children.forEach(c => subtreeIds(c).forEach(id => ids.add(id)));
+  return ids;
+}
+
+function allIds(root) { return new Set(allNodes(root).map(n => n.id)); }
+
+function renderSVG(svgEl, root, visibleIds = null, highlightIds = null, nodeColorFn = null) {
+  if (!root) { svgEl.innerHTML = ''; return; }
+  computeLayout(root);
+
+  const nodes = allNodes(root);
+  const edges = [];
+  function collectEdges(n) { n.children.forEach(c => { edges.push({from:n, to:c}); collectEdges(c); }); }
+  collectEdges(root);
+
+  const visible = visibleIds ? nodes.filter(n => visibleIds.has(n.id)) : nodes;
+  const visSet  = new Set(visible.map(n => n.id));
+  const visEdges = edges.filter(e => visSet.has(e.from.id) && visSet.has(e.to.id));
+
+  const xs = nodes.map(n => n._x), ys = nodes.map(n => n._y);
+  const minX = Math.min(...xs) - NODE_R - 8,  maxX = Math.max(...xs) + NODE_R + 8;
+  const minY = Math.min(...ys) - NODE_R - 8,  maxY = Math.max(...ys) + NODE_R + 8;
+  svgEl.setAttribute('viewBox', `${minX} ${minY} ${maxX - minX} ${maxY - minY}`);
+
+  let h = '';
+  for (const e of visEdges)
+    h += `<line x1="${e.from._x}" y1="${e.from._y}" x2="${e.to._x}" y2="${e.to._y}" stroke="#c0bbb0" stroke-width="2"/>`;
+
+  for (const n of visible) {
+    const col = nodeColorFn ? nodeColorFn(n) : nodeColor(n.op);
+    const hi  = highlightIds && highlightIds.has(n.id);
+    const fill   = hi ? col : col + '22';
+    const stroke = hi ? '#1a1714' : col;
+    const sw     = hi ? 2.5 : 1.5;
+    const lbl    = nodeLabel(n);
+    const fs     = lbl.length > 4 ? 10 : lbl.length > 2 ? 13 : 16;
+    h += `<circle cx="${n._x}" cy="${n._y}" r="${NODE_R}" fill="#ffffff" stroke="none"/>`;
+    h += `<circle cx="${n._x}" cy="${n._y}" r="${NODE_R}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    h += `<text x="${n._x}" y="${n._y + fs*0.38}" text-anchor="middle" font-size="${fs}" fill="${stroke}" font-family="monospace" font-weight="600">${lbl}</text>`;
+  }
+  svgEl.innerHTML = h;
+}
+
+// ─── Section 1: Building Blocks ──────────────────────────────────────────────
+
+function buildChips() {
+  const groups = [
+    { id:'chips-terminal', ops: TERMINALS },
+    { id:'chips-unary',    ops: UNARY },
+    { id:'chips-binary',   ops: BINARY },
+    { id:'chips-ternary',  ops: TERNARY },
+  ];
+  for (const { id, ops } of groups) {
+    const el = document.getElementById(id);
+    for (const op of ops) {
+      const chip = document.createElement('span');
+      chip.className = `chip ${op.group}`;
+      chip.textContent = op.label;
+      chip.dataset.id = op.id;
+      chip.onclick = () => selectChip(chip, op);
+      el.appendChild(chip);
+    }
+  }
+}
+
+function selectChip(chip, op) {
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  const info = document.getElementById('chip-info');
+  const col = GROUP_COLOR[op.group] || '#888';
+  info.style.borderLeftColor = col;
+  info.innerHTML = `<strong style="color:${col}">${op.label}</strong> &nbsp;—&nbsp; ${op.desc}`;
+}
+
+// ─── Section 2: Tree Animation ────────────────────────────────────────────────
+
+let currentTree = null;
+let animTimer   = null;
+const ANIM_MS   = 250;
+
+document.getElementById('depth-slider').oninput = function() {
+  document.getElementById('depth-val').textContent = this.value;
+};
+
+function rollTree() {
+  if (animTimer) { clearInterval(animTimer); animTimer = null; }
+
+  const depth = parseInt(document.getElementById('depth-slider').value);
+  currentTree = randomTree(depth);
+
+  const svgEl  = document.getElementById('tree-svg');
+  const exprEl = document.getElementById('tree-expr');
+  const badge  = document.getElementById('node-badge');
+  const btn    = document.getElementById('btn-roll');
+
+  exprEl.textContent = '…';
+  btn.disabled = true;
+
+  const bfs = bfsOrder(currentTree);
+  badge.textContent = `${bfs.length} node${bfs.length !== 1 ? 's' : ''}`;
+
+  const visible = new Set();
+  let i = 0;
+
+  animTimer = setInterval(() => {
+    visible.add(bfs[i].id);
+    renderSVG(svgEl, currentTree, visible);
+    i++;
+    if (i >= bfs.length) {
+      clearInterval(animTimer); animTimer = null;
+      exprEl.textContent = toExpr(currentTree);
+      btn.disabled = false;
+      renderSection3();
+    }
+  }, ANIM_MS);
+}
+
+// ─── Section 3: Tree → Image ──────────────────────────────────────────────────
+
+let hTree = null, sTree = null, vTree = null;
+
+function renderSection3() {
+  if (!currentTree) return;
+  renderGray(document.getElementById('canvas-main'), currentTree);
+  if (!hRemapTree) rollRemaps(); else renderRemaps();
+  if (!hTree) rerollChannels(); else renderChannels();
+}
+
+function rerollChannels() {
+  const d = parseInt(document.getElementById('depth-slider').value);
+  hTree = randomTree(d);
+  sTree = randomTree(d);
+  vTree = randomTree(d);
+  renderChannels();
+}
+
+function renderChannels() {
+  renderGray(document.getElementById('canvas-h'), hTree);
+  renderGray(document.getElementById('canvas-s'), sTree);
+  renderGray(document.getElementById('canvas-v'), vTree);
+  renderHSV(document.getElementById('canvas-combined'), hTree, sTree, vTree);
+
+  document.getElementById('expr-h').textContent = toExpr(hTree);
+  document.getElementById('expr-s').textContent = toExpr(sTree);
+  document.getElementById('expr-v').textContent = toExpr(vTree);
+}
+
+// ─── Section 4: Evolution ─────────────────────────────────────────────────────
+
+let evoA = null, evoB = null;
+
+function rerollEvo() {
+  const d = Math.min(parseInt(document.getElementById('depth-slider').value), 4);
+  evoA = randomTree(d);
+  evoB = randomTree(d);
+  renderSVG(document.getElementById('evo-svg-a'), evoA, null, allIds(evoA), () => EVO_A_COLOR);
+  renderSVG(document.getElementById('evo-svg-b'), evoB, null, allIds(evoB), () => EVO_B_COLOR);
+  renderGray(document.getElementById('evo-canvas-a'), evoA);
+  renderGray(document.getElementById('evo-canvas-b'), evoB);
+  clearCanvas(document.getElementById('evo-canvas-child'));
+  document.getElementById('evo-svg-child').innerHTML =
+    '<text x="50%" y="50%" text-anchor="middle" font-size="12" fill="#aaa8a0" font-family="system-ui">Press Crossover or Mutate</text>';
+}
+
+// Returns all nodes as a flat list; set onlyNonRoot=true to skip root
+function flatNodes(root, onlyNonRoot = false) {
+  const list = [];
+  function walk(n, isRoot) { if (!isRoot || !onlyNonRoot) list.push(n); n.children.forEach(c => walk(c, false)); }
+  walk(root, true);
+  return list;
+}
+
+// Replace the node with matching id; reuse unchanged subtrees so their IDs are preserved
+function replaceById(root, targetId, replacement) {
+  if (root.id === targetId) return replacement.clone();
+  const newChildren = root.children.map(c => replaceById(c, targetId, replacement));
+  if (newChildren.every((c, i) => c === root.children[i])) return root;
+  return new Node(root.op, newChildren, root.value);
+}
+
+// Replace targetId; return {tree, aIds, bIds}
+// aIds = IDs of A-origin nodes (preserved original refs + new path nodes)
+// bIds = IDs of the cloned B subtree
+function replaceByIdAndTrack(root, targetId, replacement) {
+  const bIds = new Set(), aIds = new Set();
+  function collectIds(n, s) { s.add(n.id); n.children.forEach(c => collectIds(c, s)); }
+  function replace(n) {
+    if (n.id === targetId) {
+      const rep = replacement.clone();
+      collectIds(rep, bIds);
+      return rep;
+    }
+    const newChildren = n.children.map(replace);
+    if (newChildren.every((c, i) => c === n.children[i])) {
+      aIds.add(n.id);
+      return n;  // unchanged — preserve original node reference and ID
+    }
+    const newNode = new Node(n.op, newChildren, n.value);
+    aIds.add(newNode.id);
+    return newNode;
+  }
+  return { tree: replace(root), aIds, bIds };
+}
+
+// Nudge constants in-place (no clone — preserves node IDs)
+function nudgeConstantsInPlace(root) {
+  if (root.op === 'const') root.value += (Math.random() - 0.5) * 0.5;
+  root.children.forEach(nudgeConstantsInPlace);
+}
+
+function doCrossover() {
+  if (!evoA || !evoB) return;
+  const btnCross = document.getElementById('btn-crossover');
+  const btnMut   = document.getElementById('btn-mutate');
+  btnCross.disabled = btnMut.disabled = true;
+
+  const svgA = document.getElementById('evo-svg-a');
+  const svgB = document.getElementById('evo-svg-b');
+  const svgC = document.getElementById('evo-svg-child');
+
+  // Pick random nodes (prefer non-leaf for interesting swaps)
+  const nodesA = flatNodes(evoA, true);
+  const nodesB = flatNodes(evoB, true);
+  const nodeA  = nodesA.length ? pick(nodesA) : evoA;
+  const nodeB  = nodesB.length ? pick(nodesB) : evoB;
+
+  const hiA = subtreeIds(nodeA);
+  const hiB = subtreeIds(nodeB);
+
+  // Highlight both parents simultaneously (blue=A, red=B)
+  renderSVG(svgA, evoA, null, hiA, () => EVO_A_COLOR);
+  renderSVG(svgB, evoB, null, hiB, () => EVO_B_COLOR);
+
+  setTimeout(() => {
+    // Step 1: crossover — aIds = A-origin nodes, bIds = B-origin nodes (by preserved IDs)
+    const { tree: crossed, aIds, bIds } = replaceByIdAndTrack(evoA, nodeA.id, nodeB);
+
+    // Step 2: mutation — nudge in-place (IDs preserved) or replace (new nodes get new IDs)
+    let child = crossed;
+    if (mutMode === 'finetune') {
+      nudgeConstantsInPlace(crossed);  // modifies in-place; aIds/bIds still valid
+    } else {
+      const depth = parseInt(document.getElementById('mut-depth').value);
+      const mNodes = flatNodes(crossed);
+      if (mNodes.length) {
+        const mTarget = pick(mNodes);
+        child = replaceById(crossed, mTarget.id, randomTree(depth));
+        // Unchanged nodes reuse original refs → aIds/bIds still valid for them
+        // Newly inserted nodes have IDs in neither set → rendered with op-group color
+      }
+    }
+
+    // Blue = from Parent A (or mutation) · Red = from Parent B
+    const childColorFn = n => bIds.has(n.id) ? EVO_B_COLOR : EVO_A_COLOR;
+    renderSVG(svgC, child, null, allIds(child), childColorFn);
+    renderGray(document.getElementById('evo-canvas-child'), child);
+
+    renderSVG(svgA, evoA, null, allIds(evoA), () => EVO_A_COLOR);
+    renderSVG(svgB, evoB, null, allIds(evoB), () => EVO_B_COLOR);
+    btnCross.disabled = btnMut.disabled = false;
+  }, 750);
+}
+
+function doMutate() {
+  if (!evoA) return;
+  const btnCross = document.getElementById('btn-crossover');
+  const btnMut   = document.getElementById('btn-mutate');
+  btnCross.disabled = btnMut.disabled = true;
+
+  const svgA = document.getElementById('evo-svg-a');
+  const svgC = document.getElementById('evo-svg-child');
+
+  const nodes  = flatNodes(evoA);
+  const target = pick(nodes);
+  const hiSet  = subtreeIds(target);
+
+  // Phase 1: highlight mutation target
+  renderSVG(svgA, evoA, null, hiSet, () => EVO_A_COLOR);
+
+  setTimeout(() => {
+    let child;
+    if (mutMode === 'finetune') {
+      child = nudgeConstants(evoA);
+    } else {
+      const depth = parseInt(document.getElementById('mut-depth').value);
+      const fresh = randomTree(depth);
+      child = replaceById(evoA, target.id, fresh);
+    }
+    renderSVG(svgC, child, null, allIds(child), () => EVO_A_COLOR);
+    renderGray(document.getElementById('evo-canvas-child'), child);
+    renderSVG(svgA, evoA, null, allIds(evoA), () => EVO_A_COLOR);
+    btnCross.disabled = btnMut.disabled = false;
+  }, 750);
+}
+
+// ─── Remap ────────────────────────────────────────────────────────────────────
+
+let hRemapTree = null, sRemapTree = null, vRemapTree = null;
+
+function rollRemaps() {
+  hRemapTree = randomTree(3);
+  sRemapTree = randomTree(3);
+  vRemapTree = randomTree(3);
+  renderRemaps();
+}
+
+function renderRemaps() {
+  if (!hRemapTree) return;
+  drawRemapOutputStrip(document.getElementById('remap-h-out'), hRemapTree, v => hsv2rgb(v, 1, 1));
+  drawRemapCurve(document.getElementById('remap-h-curve'), hRemapTree, '#1a5c8c');
+  document.getElementById('remap-expr-h').textContent = toExpr(hRemapTree);
+
+  drawRemapOutputStrip(document.getElementById('remap-s-out'), sRemapTree, v => hsv2rgb(0.6, v, 0.9));
+  drawRemapCurve(document.getElementById('remap-s-curve'), sRemapTree, '#2a6b2a');
+  document.getElementById('remap-expr-s').textContent = toExpr(sRemapTree);
+
+  drawRemapOutputStrip(document.getElementById('remap-v-out'), vRemapTree, v => hsv2rgb(0.6, 0.8, v));
+  drawRemapCurve(document.getElementById('remap-v-curve'), vRemapTree, '#b85c18');
+  document.getElementById('remap-expr-v').textContent = toExpr(vRemapTree);
+}
+
+// Render a horizontal strip showing the remapped output color at each input t
+function drawRemapOutputStrip(canvas, tree, colorFn) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const img = ctx.createImageData(W, H);
+  for (let px = 0; px < W; px++) {
+    const t = px / (W - 1);
+    const out = normalize(evalTree(tree, t * 2 - 1, 0));
+    const [r, g, b] = colorFn(out);
+    for (let py = 0; py < H; py++) {
+      const i = (py * W + px) * 4;
+      img.data[i] = r * 255 | 0; img.data[i+1] = g * 255 | 0; img.data[i+2] = b * 255 | 0; img.data[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function drawInputStrip(canvas) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0,   '#ffffff');
+  grad.addColorStop(1,   '#1a1714');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawRemapCurve(canvas, tree, color) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#f7f5f0';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle quarter-mark grid
+  ctx.strokeStyle = '#e0dcd5'; ctx.lineWidth = 0.5;
+  for (let i = 1; i < 4; i++) {
+    const gx = i * W / 4;
+    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+
+  // Identity diagonal (dashed)
+  ctx.strokeStyle = '#c8c4bc'; ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(W, 0); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Curve
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let px = 0; px <= W; px++) {
+    const t = px / W;
+    const v = normalize(evalTree(tree, t * 2 - 1, 0));
+    const py = H - v * H;
+    if (px === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
+// ─── HSV demo ─────────────────────────────────────────────────────────────────
+
+function drawHSVStrip(canvas, valFn) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const img = ctx.createImageData(W, H);
+  for (let px = 0; px < W; px++) {
+    const [r, g, b] = hsv2rgb(...valFn(px / (W - 1)));
+    for (let py = 0; py < H; py++) {
+      const i = (py * W + px) * 4;
+      img.data[i] = r*255|0; img.data[i+1] = g*255|0; img.data[i+2] = b*255|0; img.data[i+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  // Marker
+  const x = valFn.markerFrac * W;
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(x - 1.5, 0, 3, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';        ctx.fillRect(x - 0.5, 0, 1, H);
+}
+
+function updateHSV() {
+  const h = parseInt(document.getElementById('hsv-h').value) / 100;
+  const s = parseInt(document.getElementById('hsv-s').value) / 100;
+  const v = parseInt(document.getElementById('hsv-v').value) / 100;
+
+  const hFn = frac => [frac, 1, 1];    hFn.markerFrac = h;
+  const sFn = frac => [h, frac, 1];    sFn.markerFrac = s;
+  const vFn = frac => [h, s, frac];    vFn.markerFrac = v;
+
+  drawHSVStrip(document.getElementById('hsv-h-strip'), hFn);
+  drawHSVStrip(document.getElementById('hsv-s-strip'), sFn);
+  drawHSVStrip(document.getElementById('hsv-v-strip'), vFn);
+
+  const [r, g, b] = hsv2rgb(h, s, v);
+  const rc = document.getElementById('hsv-result').getContext('2d');
+  rc.fillStyle = `rgb(${r*255|0},${g*255|0},${b*255|0})`;
+  rc.fillRect(0, 0, 110, 110);
+
+  document.getElementById('hsv-values').textContent =
+    `H=${h.toFixed(2)}\nS=${s.toFixed(2)}\nV=${v.toFixed(2)}`;
+}
+
+// ─── Mutation mode ────────────────────────────────────────────────────────────
+
+let mutMode = 'replace';
+
+function setMutMode(mode) {
+  mutMode = mode;
+  document.getElementById('mut-btn-replace').classList.toggle('active', mode === 'replace');
+  document.getElementById('mut-btn-finetune').classList.toggle('active', mode === 'finetune');
+  document.getElementById('mut-mode-desc').textContent = mode === 'replace'
+    ? 'Replaces a random subtree with a freshly grown one. Used by both Crossover and Mutate.'
+    : 'Shifts all constant values by a small amount. The tree\'s structure stays the same — only the numbers change.';
+}
+
+function nudgeConstants(root) {
+  const result = root.clone();
+  function nudge(n) {
+    if (n.op === 'const') n.value += (Math.random() - 0.5) * 0.5;
+    n.children.forEach(nudge);
+  }
+  nudge(result);
+  return result;
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+buildChips();
+
+// Pre-render placeholders so canvases aren't blank
+[
+  'canvas-main','canvas-h','canvas-s','canvas-v','canvas-combined',
+  'evo-canvas-a','evo-canvas-b','evo-canvas-child'
+].forEach(id => clearCanvas(document.getElementById(id)));
+
+rerollEvo();
+updateHSV();
+
+// Auto-roll a starter tree so the page isn't empty on load
+setTimeout(rollTree, 400);
+</script>
+</body>
+</html>

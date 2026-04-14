@@ -6,7 +6,7 @@ fn main() {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
-            .with_fullscreen(true),
+            .with_maximized(true),
         ..Default::default()
     };
     eframe::run_native(

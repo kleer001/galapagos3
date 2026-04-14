@@ -53,7 +53,7 @@ pub const SEL_COLOR: (f32, f32, f32) = (1.0, 0.53, 0.0);
 /// Tree generation limits for random genome initialization.
 pub const MAX_TREE_DEPTH: usize = 18;
 pub const MIN_TREE_SIZE: usize = 6;
-pub const MAX_TREE_SIZE: usize = 30;
+pub const MAX_TREE_SIZE: usize = 1024;
 
 // ============================================================================
 // EVOLUTION PARAMETERS
@@ -84,4 +84,4 @@ pub const FRESH_RANDOM_COUNT: usize = 2;
 
 /// GPU supersampling factor for anti-aliasing.
 /// At 1080p native resolution, SSAA=1 gives the same GPU pixel budget as the old 512×256×4.
-pub const SUPERSAMPLE_FACTOR: u32 = 1;
+pub const SUPERSAMPLE_FACTOR: u32 = 2;

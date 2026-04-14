@@ -65,7 +65,7 @@ pub struct Instruction {
     pub value: f32,
 }
 
-pub const MAX_INSTRUCTIONS: usize = 256;
+pub const MAX_INSTRUCTIONS: usize = 1024;
 
 pub fn tree_to_instructions(tree: &Node) -> Vec<Instruction> {
     let mut stack = Vec::new();
@@ -113,7 +113,8 @@ impl Genome {
     }
 
     /// Reconstruct a human-readable expression string from the flat instruction list.
-    pub fn to_expr_string(&self) -> String {
+    /// `t_expr` is substituted wherever a PaletteT node appears; pass `"t"` for the default.
+    pub fn to_expr_string_with_t(&self, t_expr: &str) -> String {
         let real_end = self.instructions.iter().rposition(|i| i.op != OpCode::Const)
             .unwrap_or(0);
         let mut exprs: Vec<String> = Vec::with_capacity(real_end + 1);
@@ -126,7 +127,7 @@ impl Genome {
             let get = |idx: usize| exprs.get(idx).map(|s| s.as_str()).unwrap_or("?");
 
             let s = match &def.eval {
-                EvalFn::PaletteTVal => "t".to_string(),
+                EvalFn::PaletteTVal => t_expr.to_string(),
                 EvalFn::Nullary(_) => {
                     if instr.op == OpCode::Const {
                         format!("{:.3}", instr.value)
@@ -143,6 +144,10 @@ impl Genome {
         }
 
         exprs.into_iter().last().unwrap_or_else(|| "0.000".to_string())
+    }
+
+    pub fn to_expr_string(&self) -> String {
+        self.to_expr_string_with_t("t")
     }
 
     pub fn eval(&self, x: f32, y: f32, t: f32) -> f32 {
@@ -209,5 +214,133 @@ impl Population {
             .map(|_| Genome::new(Node::random(&mut rng)))
             .collect();
         Population { genomes }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::genome::Node;
+
+    fn spatial_terminals(expr: &str) -> bool {
+        expr.contains('x') || expr.contains('y')
+    }
+
+    fn has_palette_t(expr: &str) -> bool {
+        // "t" appears as a standalone token (not inside a longer name like "atan2")
+        expr.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|tok| tok == "t")
+    }
+
+    fn no_spatial_terminals(expr: &str) -> bool {
+        // ensure neither bare "x" nor bare "y" appear as tokens
+        !expr.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|tok| tok == "x" || tok == "y")
+    }
+
+    fn instruction_count(g: &Genome) -> usize {
+        g.instructions.iter().filter(|i| i.op != OpCode::Const).count()
+    }
+
+    #[test]
+    fn tree_size_distribution() {
+        let mut rng = rand::thread_rng();
+        let depth = crate::config::MAX_TREE_DEPTH;
+        let n = 1000;
+
+        let spatial_sizes: Vec<usize> = (0..n)
+            .map(|_| {
+                let g = Genome::new(Node::random_with_depth(&mut rng, depth));
+                instruction_count(&g)
+            })
+            .collect();
+
+        let palette_sizes: Vec<usize> = (0..n)
+            .map(|_| {
+                let g = Genome::new(Node::random_palette_with_depth(&mut rng, depth));
+                instruction_count(&g)
+            })
+            .collect();
+
+        let spatial_tiny  = spatial_sizes.iter().filter(|&&s| s <= 3).count();
+        let spatial_small = spatial_sizes.iter().filter(|&&s| s > 3 && s <= 20).count();
+        let spatial_large = spatial_sizes.iter().filter(|&&s| s > 20).count();
+        let spatial_avg   = spatial_sizes.iter().sum::<usize>() as f64 / n as f64;
+
+        let palette_tiny  = palette_sizes.iter().filter(|&&s| s <= 3).count();
+        let palette_small = palette_sizes.iter().filter(|&&s| s > 3 && s <= 20).count();
+        let palette_large = palette_sizes.iter().filter(|&&s| s > 20).count();
+        let palette_avg   = palette_sizes.iter().sum::<usize>() as f64 / n as f64;
+
+        let spatial_max = spatial_sizes.iter().copied().max().unwrap_or(0);
+        let spatial_capped = spatial_sizes.iter().filter(|&&s| s >= MAX_INSTRUCTIONS - 1).count();
+        let palette_max = palette_sizes.iter().copied().max().unwrap_or(0);
+        let palette_capped = palette_sizes.iter().filter(|&&s| s >= MAX_INSTRUCTIONS - 1).count();
+
+        println!("--- spatial (n={n}) ---");
+        println!("  tiny  (≤3 instrs): {spatial_tiny} ({:.1}%)", spatial_tiny as f64 / n as f64 * 100.0);
+        println!("  small (4-20):      {spatial_small} ({:.1}%)", spatial_small as f64 / n as f64 * 100.0);
+        println!("  large (>20):       {spatial_large} ({:.1}%)", spatial_large as f64 / n as f64 * 100.0);
+        println!("  avg instructions:  {spatial_avg:.1}");
+        println!("  max instructions:  {spatial_max}");
+        println!("  hitting cap (≥{}): {spatial_capped}", MAX_INSTRUCTIONS - 1);
+
+        println!("--- palette (n={n}) ---");
+        println!("  tiny  (≤3 instrs): {palette_tiny} ({:.1}%)", palette_tiny as f64 / n as f64 * 100.0);
+        println!("  small (4-20):      {palette_small} ({:.1}%)", palette_small as f64 / n as f64 * 100.0);
+        println!("  large (>20):       {palette_large} ({:.1}%)", palette_large as f64 / n as f64 * 100.0);
+        println!("  avg instructions:  {palette_avg:.1}");
+        println!("  max instructions:  {palette_max}");
+        println!("  hitting cap (≥{}): {palette_capped}", MAX_INSTRUCTIONS - 1);
+    }
+
+    #[test]
+    fn spatial_and_palette_genomes_are_independent() {
+        let mut rng = rand::thread_rng();
+        let depth = crate::config::MAX_TREE_DEPTH;
+
+        for i in 0..8 {
+            let h  = Genome::new(Node::random_with_depth(&mut rng, depth));
+            let s  = Genome::new(Node::random_with_depth(&mut rng, depth));
+            let v  = Genome::new(Node::random_with_depth(&mut rng, depth));
+            let hr = Genome::new(Node::random_palette_with_depth(&mut rng, depth));
+            let sr = Genome::new(Node::random_palette_with_depth(&mut rng, depth));
+            let vr = Genome::new(Node::random_palette_with_depth(&mut rng, depth));
+
+            let h_s  = h.to_expr_string();
+            let s_s  = s.to_expr_string();
+            let v_s  = v.to_expr_string();
+            let hr_s = hr.to_expr_string();
+            let sr_s = sr.to_expr_string();
+            let vr_s = vr.to_expr_string();
+
+            println!("--- individual {i} ---");
+            println!("H:       {h_s}");
+            println!("S:       {s_s}");
+            println!("V:       {v_s}");
+            println!("H_remap: {hr_s}");
+            println!("S_remap: {sr_s}");
+            println!("V_remap: {vr_s}");
+
+            // Spatial genomes must reference x or y
+            assert!(spatial_terminals(&h_s),  "H has no spatial terminal: {h_s}");
+            assert!(spatial_terminals(&s_s),  "S has no spatial terminal: {s_s}");
+            assert!(spatial_terminals(&v_s),  "V has no spatial terminal: {v_s}");
+
+            // Remap genomes must NOT contain bare x or y
+            assert!(no_spatial_terminals(&hr_s), "H_remap contains spatial terminal: {hr_s}");
+            assert!(no_spatial_terminals(&sr_s), "S_remap contains spatial terminal: {sr_s}");
+            assert!(no_spatial_terminals(&vr_s), "V_remap contains spatial terminal: {vr_s}");
+
+            // Remap genomes must contain t
+            assert!(has_palette_t(&hr_s), "H_remap has no t: {hr_s}");
+            assert!(has_palette_t(&sr_s), "S_remap has no t: {sr_s}");
+            assert!(has_palette_t(&vr_s), "V_remap has no t: {vr_s}");
+
+            // Spatial and remap sets must not be identical as groups
+            assert_ne!(h_s, hr_s, "individual {i}: H == H_remap");
+            assert_ne!(s_s, sr_s, "individual {i}: S == S_remap");
+            assert_ne!(v_s, vr_s, "individual {i}: V == V_remap");
+        }
     }
 }

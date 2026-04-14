@@ -21,19 +21,15 @@ pub struct Individual {
     pub v_remap: Genome,
 }
 
-fn identity_remap() -> Genome {
-    Genome::new(Node::terminal(galapagos3::genome::OpCode::PaletteT))
-}
-
 impl Individual {
     pub fn random_with_depth(rng: &mut impl Rng, max_depth: usize) -> Self {
         Self {
             h: Genome::new(Node::random_with_depth(rng, max_depth)),
             s: Genome::new(Node::random_with_depth(rng, max_depth)),
             v: Genome::new(Node::random_with_depth(rng, max_depth)),
-            h_remap: identity_remap(),
-            s_remap: identity_remap(),
-            v_remap: identity_remap(),
+            h_remap: Genome::new(Node::random_palette_with_depth(rng, max_depth)),
+            s_remap: Genome::new(Node::random_palette_with_depth(rng, max_depth)),
+            v_remap: Genome::new(Node::random_palette_with_depth(rng, max_depth)),
         }
     }
 
@@ -436,24 +432,30 @@ impl eframe::App for App {
         // ── Main view — zoom or tile grid ────────────────────────────────────
         egui::CentralPanel::no_frame().show_inside(ui, |ui| {
             if let Some(idx) = self.zoom_tile {
-                // Zoom view: tile fills available space
-                let avail = ui.available_size();
+                // Zoom view: tile centered at 1:1 pixel size
                 let panel_rect = ui.available_rect_before_wrap();
                 if idx < self.tile_textures.len() {
                     let painter = ui.painter().clone();
-                    ui.centered_and_justified(|ui| {
-                        ui.add(
-                            egui::Image::new(&self.tile_textures[idx])
-                                .fit_to_exact_size(avail),
-                        );
-                    });
-                    painter.text(
-                        egui::pos2(panel_rect.center().x, panel_rect.bottom() - 24.0),
+                    let ppp = ctx.pixels_per_point();
+                    let native = egui::vec2(config::TILE_W as f32 / ppp, config::TILE_H as f32 / ppp);
+                    let img_rect = egui::Rect::from_center_size(panel_rect.center(), native);
+                    ui.put(img_rect, egui::Image::new(&self.tile_textures[idx]).fit_to_exact_size(native));
+                    let hint = "S to save  |  Z or Esc to return";
+                    let hint_font = egui::FontId::proportional(14.0);
+                    let hint_pos = egui::pos2(panel_rect.center().x, panel_rect.bottom() - 24.0);
+                    let bg_slot = painter.add(egui::Shape::Noop);
+                    let text_rect = painter.text(
+                        hint_pos,
                         egui::Align2::CENTER_CENTER,
-                        "S to save  |  Z or Esc to return",
-                        egui::FontId::proportional(14.0),
-                        egui::Color32::from_rgba_unmultiplied(200, 200, 200, 180),
+                        hint,
+                        hint_font,
+                        egui::Color32::from_rgba_unmultiplied(200, 200, 200, 220),
                     );
+                    painter.set(bg_slot, egui::Shape::rect_filled(
+                        text_rect.expand2(egui::vec2(8.0, 4.0)),
+                        4.0,
+                        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
+                    ));
                 }
                 if ctx.input(|i| i.key_pressed(egui::Key::S)) {
                     self.do_save_zoomed(idx);

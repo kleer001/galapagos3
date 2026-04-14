@@ -60,17 +60,17 @@ impl Node {
             .filter(|def| !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::Const | OpCode::PaletteT))
             .collect();
         let def = eligible[rng.gen_range(0..eligible.len())];
-        let child_budget = max_size.saturating_sub(1);
 
         match def.arity {
             Arity::Nullary => Node::terminal(def.opcode),
             Arity::Unary => {
-                let child = Self::random_bounded(rng, max_depth - 1, child_budget);
+                let child = Self::random_bounded(rng, max_depth - 1, max_size - 1);
                 Node::unary(def.opcode, child)
             }
             Arity::Binary => {
-                let a = Self::random_bounded(rng, max_depth - 1, child_budget);
-                let b = Self::random_bounded(rng, max_depth - 1, child_budget);
+                let budget = (max_size - 1) / 2;
+                let a = Self::random_bounded(rng, max_depth - 1, budget);
+                let b = Self::random_bounded(rng, max_depth - 1, budget);
                 if def.opcode == OpCode::FBM {
                     let mut node = Node::binary(def.opcode, a, b);
                     node.c_literal = rng.gen_range(1..=6);
@@ -79,14 +79,15 @@ impl Node {
                 Node::binary(def.opcode, a, b)
             }
             Arity::Ternary => {
-                let a = Self::random_bounded(rng, max_depth - 1, child_budget);
-                let b = Self::random_bounded(rng, max_depth - 1, child_budget);
+                let budget = (max_size - 1) / 3;
+                let a = Self::random_bounded(rng, max_depth - 1, budget);
+                let b = Self::random_bounded(rng, max_depth - 1, budget);
                 // Mix: 3rd child is a constant blend parameter
                 if def.opcode == OpCode::Mix {
                     let t = Node::constant(rng.gen_range(0.0..1.0));
                     return Node::ternary(def.opcode, a, b, t);
                 }
-                let c = Self::random_bounded(rng, max_depth - 1, child_budget);
+                let c = Self::random_bounded(rng, max_depth - 1, budget);
                 Node::ternary(def.opcode, a, b, c)
             }
         }
@@ -126,6 +127,10 @@ impl Node {
         Self::random_palette_bounded(rng, config::MAX_TREE_DEPTH, config::MAX_TREE_SIZE)
     }
 
+    pub fn random_palette_with_depth(rng: &mut impl Rng, max_depth: usize) -> Self {
+        Self::random_palette_bounded(rng, max_depth, config::MAX_TREE_SIZE)
+    }
+
     fn random_palette_terminal(_rng: &mut impl Rng) -> Self {
         Node::terminal(OpCode::PaletteT)
     }
@@ -138,23 +143,23 @@ impl Node {
             return Self::random_palette_terminal(rng);
         }
 
-        // Same eligible ops as spatial (skip X, Y, Const, PaletteT at the op-selection level;
-        // PaletteT will only appear as a leaf via random_palette_terminal)
+        // Same eligible ops as spatial (skip all spatial terminals and PaletteT at the
+        // op-selection level; PaletteT will only appear as a leaf via random_palette_terminal)
         let eligible: Vec<&crate::genome::op::OpDef> = OP_REGISTRY.iter()
-            .filter(|def| !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::Const | OpCode::PaletteT))
+            .filter(|def| !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::MirrorX | OpCode::MirrorY | OpCode::Const | OpCode::PaletteT))
             .collect();
         let def = eligible[rng.gen_range(0..eligible.len())];
-        let child_budget = max_size.saturating_sub(1);
 
         match def.arity {
             Arity::Nullary => Node::terminal(def.opcode),
             Arity::Unary => {
-                let child = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                let child = Self::random_palette_bounded(rng, max_depth - 1, max_size - 1);
                 Node::unary(def.opcode, child)
             }
             Arity::Binary => {
-                let a = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
-                let b = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                let budget = (max_size - 1) / 2;
+                let a = Self::random_palette_bounded(rng, max_depth - 1, budget);
+                let b = Self::random_palette_bounded(rng, max_depth - 1, budget);
                 if def.opcode == OpCode::FBM {
                     let mut node = Node::binary(def.opcode, a, b);
                     node.c_literal = rng.gen_range(1..=6);
@@ -163,13 +168,14 @@ impl Node {
                 Node::binary(def.opcode, a, b)
             }
             Arity::Ternary => {
-                let a = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
-                let b = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                let budget = (max_size - 1) / 3;
+                let a = Self::random_palette_bounded(rng, max_depth - 1, budget);
+                let b = Self::random_palette_bounded(rng, max_depth - 1, budget);
                 if def.opcode == OpCode::Mix {
                     let blend = Node::constant(rng.gen_range(0.0..1.0));
                     return Node::ternary(def.opcode, a, b, blend);
                 }
-                let c = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                let c = Self::random_palette_bounded(rng, max_depth - 1, budget);
                 Node::ternary(def.opcode, a, b, c)
             }
         }
