@@ -186,6 +186,7 @@ pub struct App {
     needs_render: bool,
     settings_open: bool,
     zoom_tile: Option<usize>,
+    hovered_tile: Option<usize>,
 }
 
 impl App {
@@ -225,6 +226,7 @@ impl App {
             needs_render: true,
             settings_open: false,
             zoom_tile: None,
+            hovered_tile: None,
         }
     }
 
@@ -319,6 +321,44 @@ impl App {
         img.save(&filename).expect("Failed to save PNG");
         println!("Saved {filename}");
     }
+
+    pub fn do_save_zoomed(&mut self, idx: usize) {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        std::fs::create_dir_all("output").unwrap();
+
+        // PNG — single tile, no border
+        let pixels = &self.tiles[idx];
+        let mut img = image::RgbaImage::new(config::TILE_W, config::TILE_H);
+        for y in 0..config::TILE_H as usize {
+            for x in 0..config::TILE_W as usize {
+                let px = pixels[y * config::TILE_W as usize + x];
+                img.put_pixel(x as u32, y as u32, image::Rgba([
+                    ((px >> 16) & 0xFF) as u8,
+                    ((px >> 8) & 0xFF) as u8,
+                    (px & 0xFF) as u8,
+                    255,
+                ]));
+            }
+        }
+        let png_path = format!("output/{ts:019}_{idx}.png");
+        img.save(&png_path).expect("Failed to save PNG");
+
+        // Expression text
+        let ind = &self.pop[idx];
+        let text = format!(
+            "H:       {}\nS:       {}\nV:       {}\nH_remap: {}\nS_remap: {}\nV_remap: {}\n",
+            ind.h.to_expr_string(),
+            ind.s.to_expr_string(),
+            ind.v.to_expr_string(),
+            ind.h_remap.to_expr_string(),
+            ind.s_remap.to_expr_string(),
+            ind.v_remap.to_expr_string(),
+        );
+        let txt_path = format!("output/{ts:019}_{idx}.txt");
+        std::fs::write(&txt_path, &text).expect("Failed to save expression text");
+
+        println!("Saved {png_path} + {txt_path}");
+    }
 }
 
 impl eframe::App for App {
@@ -348,20 +388,16 @@ impl eframe::App for App {
                     self.do_randomize();
                 }
                 if ui.button("💾 Save").clicked()
-                    || ctx.input(|i| i.key_pressed(egui::Key::S))
+                    || (self.zoom_tile.is_none() && ctx.input(|i| i.key_pressed(egui::Key::S)))
                 {
                     self.do_save();
                 }
-                // Z: toggle zoom for single selected tile; Escape: exit zoom
+                // Z: zoom tile under mouse; Escape: exit zoom
                 if ctx.input(|i| i.key_pressed(egui::Key::Z)) {
                     if self.zoom_tile.is_some() {
                         self.zoom_tile = None;
                     } else {
-                        let selected: Vec<usize> = self.selected.iter().enumerate()
-                            .filter(|(_, &s)| s).map(|(i, _)| i).collect();
-                        if selected.len() == 1 {
-                            self.zoom_tile = Some(selected[0]);
-                        }
+                        self.zoom_tile = self.hovered_tile;
                     }
                 }
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -400,7 +436,7 @@ impl eframe::App for App {
         // ── Main view — zoom or tile grid ────────────────────────────────────
         egui::CentralPanel::no_frame().show_inside(ui, |ui| {
             if let Some(idx) = self.zoom_tile {
-                // Zoom view: selected tile fills available space
+                // Zoom view: tile fills available space
                 let avail = ui.available_size();
                 let panel_rect = ui.available_rect_before_wrap();
                 if idx < self.tile_textures.len() {
@@ -414,10 +450,13 @@ impl eframe::App for App {
                     painter.text(
                         egui::pos2(panel_rect.center().x, panel_rect.bottom() - 24.0),
                         egui::Align2::CENTER_CENTER,
-                        "Z or Esc to return",
+                        "S to save  |  Z or Esc to return",
                         egui::FontId::proportional(14.0),
                         egui::Color32::from_rgba_unmultiplied(200, 200, 200, 180),
                     );
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::S)) {
+                    self.do_save_zoomed(idx);
                 }
             } else {
                 let avail = ui.available_size();
@@ -442,6 +481,7 @@ impl eframe::App for App {
                 let gap_y = ((avail.y - rows * tile_h) / (rows + 1.0)).max(MIN_GAP).floor();
 
                 // Outer left/top padding equals the inter-tile gap for uniform matting.
+                let mut new_hovered: Option<usize> = None;
                 ui.add_space(gap_y);
                 ui.horizontal(|ui| {
                     ui.add_space(gap_x);
@@ -457,8 +497,10 @@ impl eframe::App for App {
                                         .fit_to_exact_size(tile_size)
                                         .sense(egui::Sense::click()),
                                 );
+                                if response.hovered() {
+                                    new_hovered = Some(i);
+                                }
                                 if response.double_clicked() {
-                                    self.selected[i] = true;
                                     self.zoom_tile = Some(i);
                                 } else if response.clicked() {
                                     self.selected[i] = !self.selected[i];
@@ -485,6 +527,7 @@ impl eframe::App for App {
                             }
                         });
                 });
+                self.hovered_tile = new_hovered;
             }
         });
     }

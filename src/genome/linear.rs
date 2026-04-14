@@ -112,6 +112,39 @@ impl Genome {
         }
     }
 
+    /// Reconstruct a human-readable expression string from the flat instruction list.
+    pub fn to_expr_string(&self) -> String {
+        let real_end = self.instructions.iter().rposition(|i| i.op != OpCode::Const)
+            .unwrap_or(0);
+        let mut exprs: Vec<String> = Vec::with_capacity(real_end + 1);
+
+        for k in 0..=real_end {
+            let instr = &self.instructions[k];
+            let (a, b, c) = (instr.a as usize, instr.b as usize, instr.c as usize);
+            let def = op_def(instr.op);
+            let name = def.name.to_lowercase();
+            let get = |idx: usize| exprs.get(idx).map(|s| s.as_str()).unwrap_or("?");
+
+            let s = match &def.eval {
+                EvalFn::PaletteTVal => "t".to_string(),
+                EvalFn::Nullary(_) => {
+                    if instr.op == OpCode::Const {
+                        format!("{:.3}", instr.value)
+                    } else {
+                        name
+                    }
+                }
+                EvalFn::Unary(_) => format!("{}({})", name, get(a)),
+                EvalFn::Binary(_) => format!("{}({}, {})", name, get(a), get(b)),
+                EvalFn::Ternary(_) => format!("{}({}, {}, {})", name, get(a), get(b), get(c)),
+                EvalFn::BinaryLiteral(_) => format!("{}({}, {}, {})", name, get(a), get(b), instr.c),
+            };
+            exprs.push(s);
+        }
+
+        exprs.into_iter().last().unwrap_or_else(|| "0.000".to_string())
+    }
+
     pub fn eval(&self, x: f32, y: f32, t: f32) -> f32 {
         let mut stack = vec![0.0; MAX_INSTRUCTIONS];
         let mut used = 0;
