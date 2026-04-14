@@ -78,9 +78,6 @@ pub const FRESH_RANDOM_COUNT: usize = 2;
 // UI LAYOUT
 // ============================================================================
 
-/// Width of the left settings panel in the egui UI (pixels).
-pub const SETTINGS_PANEL_WIDTH: f32 = 220.0;
-
 /// Pixel gap between tiles in the egui Grid widget.
 pub const GRID_TILE_SPACING: f32 = 4.0;
 

@@ -184,6 +184,7 @@ pub struct App {
     rt_config: RuntimeConfig,
     generation: usize,
     needs_render: bool,
+    settings_open: bool,
 }
 
 impl App {
@@ -221,6 +222,7 @@ impl App {
             rt_config,
             generation: 0,
             needs_render: true,
+            settings_open: false,
         }
     }
 
@@ -350,43 +352,59 @@ impl eframe::App for App {
                 }
                 ui.separator();
                 ui.label(format!("Gen {} | {} selected", self.generation, sel_count));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.toggle_value(&mut self.settings_open, "⚙ Settings");
+                });
             });
         });
 
-        // ── Parameter panel ──────────────────────────────────────────────────
-        egui::Panel::left("settings")
-            .resizable(false)
-            .exact_size(config::SETTINGS_PANEL_WIDTH)
-            .show_inside(ui, |ui| {
-                ui.heading("Evolution");
-                ui.add(egui::Slider::new(&mut self.rt_config.subtree_mutation_prob, 0.0..=1.0)
-                    .text("SubtreeMut"));
-                ui.add(egui::Slider::new(&mut self.rt_config.subtree_stop_prob, 0.0..=1.0)
-                    .text("SubtreeStop"));
-                ui.add(egui::Slider::new(&mut self.rt_config.binary_child_side_prob, 0.0..=1.0)
-                    .text("BinarySide"));
-                ui.add(egui::DragValue::new(&mut self.rt_config.fresh_random_count)
-                    .range(0..=(config::POP_SIZE / 2))
-                    .prefix("FreshRand: "));
-                ui.add(egui::DragValue::new(&mut self.rt_config.max_tree_depth)
-                    .range(1..=15usize)
-                    .prefix("MaxDepth: "));
-            });
+        // ── Settings floating window ─────────────────────────────────────────
+        if self.settings_open {
+            egui::Window::new("Settings")
+                .resizable(false)
+                .collapsible(false)
+                .show(&ctx, |ui| {
+                    ui.heading("Evolution");
+                    ui.add(egui::Slider::new(&mut self.rt_config.subtree_mutation_prob, 0.0..=1.0)
+                        .text("SubtreeMut"));
+                    ui.add(egui::Slider::new(&mut self.rt_config.subtree_stop_prob, 0.0..=1.0)
+                        .text("SubtreeStop"));
+                    ui.add(egui::Slider::new(&mut self.rt_config.binary_child_side_prob, 0.0..=1.0)
+                        .text("BinarySide"));
+                    ui.add(egui::DragValue::new(&mut self.rt_config.fresh_random_count)
+                        .range(0..=(config::POP_SIZE / 2))
+                        .prefix("FreshRand: "));
+                    ui.add(egui::DragValue::new(&mut self.rt_config.max_tree_depth)
+                        .range(1..=15usize)
+                        .prefix("MaxDepth: "));
+                });
+        }
 
-        // ── Tile grid ────────────────────────────────────────────────────────
+        // ── Tile grid — fills all remaining space ────────────────────────────
         egui::CentralPanel::no_frame().show_inside(ui, |ui| {
+            let avail = ui.available_size();
+            let spacing = config::GRID_TILE_SPACING;
+            let cols = config::GRID_COLS as f32;
+            let rows = config::GRID_ROWS as f32;
+            let aspect = config::TILE_W as f32 / config::TILE_H as f32;
+
+            // Fit tiles into available area while preserving render aspect ratio
+            let tile_w_from_width = ((avail.x - spacing * (cols - 1.0)) / cols).floor();
+            let tile_h_from_width = (tile_w_from_width / aspect).floor();
+            let tile_h_from_height = ((avail.y - spacing * (rows - 1.0)) / rows).floor();
+            let tile_h = tile_h_from_width.min(tile_h_from_height).max(1.0);
+            let tile_w = (tile_h * aspect).floor().max(1.0);
+            let tile_size = egui::vec2(tile_w, tile_h);
+
             egui::Grid::new("tiles")
                 .num_columns(config::GRID_COLS)
-                .spacing([config::GRID_TILE_SPACING, config::GRID_TILE_SPACING])
+                .spacing([spacing, spacing])
                 .show(ui, |ui| {
                     for i in 0..self.tile_textures.len() {
                         let handle = &self.tile_textures[i];
                         let response = ui.add(
                             egui::Image::new(handle)
-                                .fit_to_exact_size(egui::vec2(
-                                    config::TILE_W as f32,
-                                    config::TILE_H as f32,
-                                ))
+                                .fit_to_exact_size(tile_size)
                                 .sense(egui::Sense::click()),
                         );
                         if response.clicked() {
