@@ -22,33 +22,38 @@ pub enum OpCode {
     Pow = 15,
     Mix = 16,
     Smoothstep = 17,
-    Length = 18,
-    Dot = 19,
     // Phase 2 operators
-    Acos = 20,
-    Asin = 21,
-    Atan = 22,
-    Sinh = 23,
-    Cosh = 24,
-    Tanh = 25,
-    Min = 26,
-    Max = 27,
-    Clamp = 28,
-    Sign = 29,
-    Floor = 30,
-    Ceil = 31,
-    Round = 32,
-    Negate = 33,
-    Step = 34,
-    Reciprocal = 35,
-    Invert = 36,
+    Acos = 18,
+    Asin = 19,
+    Atan = 20,
+    Sinh = 21,
+    Cosh = 22,
+    Tanh = 23,
+    Min = 24,
+    Max = 25,
+    Clamp = 26,
+    Sign = 27,
+    Floor = 28,
+    Ceil = 29,
+    Round = 30,
+    Negate = 31,
+    Step = 32,
+    Reciprocal = 33,
+    Invert = 34,
     // Phase 3 operators
-    ValueNoise = 37,
-    FBM = 38,
-    WarpX = 39,
-    WarpY = 40,
-    MirrorX = 41,
-    MirrorY = 42,
+    ValueNoise = 35,
+    FBM = 36,
+    MirrorX = 37,
+    MirrorY = 38,
+    // New operators
+    Atan2 = 39,
+    Mod = 40,
+    Worley = 41,
+    TriWave = 42,
+    Chebyshev = 43,
+    Manhattan = 44,
+    SinFold = 45,
+    PaletteT = 46,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -107,7 +112,40 @@ impl Genome {
         }
     }
 
-    pub fn eval(&self, x: f32, y: f32) -> f32 {
+    /// Reconstruct a human-readable expression string from the flat instruction list.
+    pub fn to_expr_string(&self) -> String {
+        let real_end = self.instructions.iter().rposition(|i| i.op != OpCode::Const)
+            .unwrap_or(0);
+        let mut exprs: Vec<String> = Vec::with_capacity(real_end + 1);
+
+        for k in 0..=real_end {
+            let instr = &self.instructions[k];
+            let (a, b, c) = (instr.a as usize, instr.b as usize, instr.c as usize);
+            let def = op_def(instr.op);
+            let name = def.name.to_lowercase();
+            let get = |idx: usize| exprs.get(idx).map(|s| s.as_str()).unwrap_or("?");
+
+            let s = match &def.eval {
+                EvalFn::PaletteTVal => "t".to_string(),
+                EvalFn::Nullary(_) => {
+                    if instr.op == OpCode::Const {
+                        format!("{:.3}", instr.value)
+                    } else {
+                        name
+                    }
+                }
+                EvalFn::Unary(_) => format!("{}({})", name, get(a)),
+                EvalFn::Binary(_) => format!("{}({}, {})", name, get(a), get(b)),
+                EvalFn::Ternary(_) => format!("{}({}, {}, {})", name, get(a), get(b), get(c)),
+                EvalFn::BinaryLiteral(_) => format!("{}({}, {}, {})", name, get(a), get(b), instr.c),
+            };
+            exprs.push(s);
+        }
+
+        exprs.into_iter().last().unwrap_or_else(|| "0.000".to_string())
+    }
+
+    pub fn eval(&self, x: f32, y: f32, t: f32) -> f32 {
         let mut stack = vec![0.0; MAX_INSTRUCTIONS];
         let mut used = 0;
 
@@ -120,6 +158,10 @@ impl Genome {
             let def = op_def(instr.op);
 
             match &def.eval {
+                EvalFn::PaletteTVal => {
+                    stack[used] = t;
+                    used += 1;
+                }
                 EvalFn::Nullary(f) => {
                     stack[used] = f(x, y, instr.value);
                     used += 1;

@@ -167,6 +167,88 @@ fn replace_node(node: &Node, rng: &mut impl Rng) -> Node {
     }
 }
 
+// ---- Palette genome mutation (PaletteT is the "X/Y" of palette trees) ----
+
+pub fn mutate_palette_with_params(genome: &Genome, rng: &mut impl Rng, params: &EvolutionParams) -> Genome {
+    let mut tree = genome.tree();
+    if rng.gen_bool(params.subtree_mutation_prob) {
+        tree = mutate_subtree_with_params(&tree, rng, params);
+    } else {
+        tree = replace_palette_node(&tree, rng);
+    }
+    Genome::new(tree)
+}
+
+fn replace_palette_node(node: &Node, rng: &mut impl Rng) -> Node {
+    let def = op_def(node.op);
+
+    match def.arity {
+        Arity::Nullary => {
+            if node.op == OpCode::PaletteT {
+                node.clone()
+            } else {
+                Node::random_palette(rng)
+            }
+        }
+        Arity::Unary => {
+            let mut result = node.clone();
+            result.children[0] = replace_palette_node(&node.children[0], rng);
+            result
+        }
+        Arity::Binary => {
+            match rng.gen_range(0..3) {
+                0 => {
+                    let mut result = node.clone();
+                    result.children[0] = replace_palette_node(&node.children[0], rng);
+                    result
+                }
+                1 => {
+                    let mut result = node.clone();
+                    result.children[1] = replace_palette_node(&node.children[1], rng);
+                    result
+                }
+                _ => Node::random_palette(rng),
+            }
+        }
+        Arity::Ternary => {
+            if node.op == OpCode::Mix {
+                match rng.gen_range(0..3) {
+                    0 => {
+                        let mut result = node.clone();
+                        result.children[0] = replace_palette_node(&node.children[0], rng);
+                        result
+                    }
+                    1 => {
+                        let mut result = node.clone();
+                        result.children[1] = replace_palette_node(&node.children[1], rng);
+                        result
+                    }
+                    _ => Node::random_palette(rng),
+                }
+            } else {
+                match rng.gen_range(0..4) {
+                    0 => {
+                        let mut result = node.clone();
+                        result.children[0] = replace_palette_node(&node.children[0], rng);
+                        result
+                    }
+                    1 => {
+                        let mut result = node.clone();
+                        result.children[1] = replace_palette_node(&node.children[1], rng);
+                        result
+                    }
+                    2 => {
+                        let mut result = node.clone();
+                        result.children[2] = replace_palette_node(&node.children[2], rng);
+                        result
+                    }
+                    _ => Node::random_palette(rng),
+                }
+            }
+        }
+    }
+}
+
 pub fn crossover(a: &Genome, b: &Genome, rng: &mut impl Rng) -> Genome {
     let tree = if rng.gen_bool(0.5) { a.tree() } else { b.tree() };
     Genome::new(tree)

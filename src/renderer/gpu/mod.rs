@@ -181,16 +181,6 @@ impl GpuRenderer {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -262,19 +252,23 @@ impl GpuRenderer {
         h_genome: &Genome,
         s_genome: &Genome,
         v_genome: &Genome,
-        _palette: u32,
+        h_remap: &Genome,
+        s_remap: &Genome,
+        v_remap: &Genome,
     ) -> RenderResult<Vec<u32>> {
         let output_w = config::TILE_W;
         let output_h = config::TILE_H;
         let render_w = output_w * config::SUPERSAMPLE_FACTOR;
         let render_h = output_h * config::SUPERSAMPLE_FACTOR;
 
-        // Convert instructions to GPU format
         let h_instr = Self::instructions_to_gpu(&h_genome.instructions);
         let s_instr = Self::instructions_to_gpu(&s_genome.instructions);
         let v_instr = Self::instructions_to_gpu(&v_genome.instructions);
+        let hr_instr = Self::instructions_to_gpu(&h_remap.instructions);
+        let sr_instr = Self::instructions_to_gpu(&s_remap.instructions);
+        let vr_instr = Self::instructions_to_gpu(&v_remap.instructions);
 
-        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, _palette, render_w, render_h, output_w, output_h).await
+        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h).await
     }
 
     /// Render a single tile from raw instruction tuples (for external use)
@@ -283,19 +277,23 @@ impl GpuRenderer {
         h_raw: &[(u32, i32, i32, i32, f32)],
         s_raw: &[(u32, i32, i32, i32, f32)],
         v_raw: &[(u32, i32, i32, i32, f32)],
-        palette: u32,
+        hr_raw: &[(u32, i32, i32, i32, f32)],
+        sr_raw: &[(u32, i32, i32, i32, f32)],
+        vr_raw: &[(u32, i32, i32, i32, f32)],
     ) -> RenderResult<Vec<u32>> {
         let output_w = config::TILE_W;
         let output_h = config::TILE_H;
         let render_w = output_w * config::SUPERSAMPLE_FACTOR;
         let render_h = output_h * config::SUPERSAMPLE_FACTOR;
 
-        // Convert raw instructions to GPU format
         let h_instr = instructions_to_gpu_raw(h_raw);
         let s_instr = instructions_to_gpu_raw(s_raw);
         let v_instr = instructions_to_gpu_raw(v_raw);
+        let hr_instr = instructions_to_gpu_raw(hr_raw);
+        let sr_instr = instructions_to_gpu_raw(sr_raw);
+        let vr_instr = instructions_to_gpu_raw(vr_raw);
 
-        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, palette, render_w, render_h, output_w, output_h).await
+        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h).await
     }
 
     /// Internal: render from already-converted GPU instructions with supersampling
@@ -304,7 +302,9 @@ impl GpuRenderer {
         h_instr: [GpuInstruction; config::MAX_INSTRUCTIONS],
         s_instr: [GpuInstruction; config::MAX_INSTRUCTIONS],
         v_instr: [GpuInstruction; config::MAX_INSTRUCTIONS],
-        palette: u32,
+        hr_instr: [GpuInstruction; config::MAX_INSTRUCTIONS],
+        sr_instr: [GpuInstruction; config::MAX_INSTRUCTIONS],
+        vr_instr: [GpuInstruction; config::MAX_INSTRUCTIONS],
         render_w: u32,
         render_h: u32,
         output_w: u32,
@@ -313,13 +313,16 @@ impl GpuRenderer {
         let render_size = (render_w * render_h) as usize;
         let output_size = (output_w * output_h) as usize;
 
-        // Create flat array of all instructions (H, S, V concatenated)
+        // Flat buffer: H, S, V spatial + H, S, V remap (6 genomes total)
         const INSTRUCTIONS_PER_CHANNEL: usize = config::MAX_INSTRUCTIONS;
-        const TOTAL_INSTRUCTIONS: usize = INSTRUCTIONS_PER_CHANNEL * 3;
+        const TOTAL_INSTRUCTIONS: usize = INSTRUCTIONS_PER_CHANNEL * 6;
         let mut all_instructions = [GpuInstruction::default(); TOTAL_INSTRUCTIONS];
         all_instructions[0..INSTRUCTIONS_PER_CHANNEL].copy_from_slice(&h_instr);
         all_instructions[INSTRUCTIONS_PER_CHANNEL..INSTRUCTIONS_PER_CHANNEL * 2].copy_from_slice(&s_instr);
-        all_instructions[INSTRUCTIONS_PER_CHANNEL * 2..TOTAL_INSTRUCTIONS].copy_from_slice(&v_instr);
+        all_instructions[INSTRUCTIONS_PER_CHANNEL * 2..INSTRUCTIONS_PER_CHANNEL * 3].copy_from_slice(&v_instr);
+        all_instructions[INSTRUCTIONS_PER_CHANNEL * 3..INSTRUCTIONS_PER_CHANNEL * 4].copy_from_slice(&hr_instr);
+        all_instructions[INSTRUCTIONS_PER_CHANNEL * 4..INSTRUCTIONS_PER_CHANNEL * 5].copy_from_slice(&sr_instr);
+        all_instructions[INSTRUCTIONS_PER_CHANNEL * 5..TOTAL_INSTRUCTIONS].copy_from_slice(&vr_instr);
 
         // Create instructions storage buffer
         let instr_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -334,13 +337,6 @@ impl GpuRenderer {
             label: Some("Output Info Buffer"),
             contents: bytemuck::cast_slice(&[output_info]),
             usage: wgpu::BufferUsages::UNIFORM,
-        });
-
-        // Create palette buffer (single u32 for this tile)
-        let palette_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Palette Buffer"),
-            contents: bytemuck::cast_slice(&[palette]),
-            usage: wgpu::BufferUsages::STORAGE,
         });
 
         // Create high-res output storage buffer (RGBA32 float)
@@ -358,8 +354,7 @@ impl GpuRenderer {
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: instr_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: info_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: palette_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: render_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: render_buffer.as_entire_binding() },
             ],
         });
 

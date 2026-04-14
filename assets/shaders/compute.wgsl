@@ -31,33 +31,38 @@ const OP_DIV: u32 = 14;
 const OP_POW: u32 = 15;
 const OP_MIX: u32 = 16;
 const OP_SMOOTHSTEP: u32 = 17;
-const OP_LENGTH: u32 = 18;
-const OP_DOT: u32 = 19;
 // Phase 2 operators
-const OP_ACOS: u32 = 20;
-const OP_ASIN: u32 = 21;
-const OP_ATAN: u32 = 22;
-const OP_SINH: u32 = 23;
-const OP_COSH: u32 = 24;
-const OP_TANH: u32 = 25;
-const OP_MIN: u32 = 26;
-const OP_MAX: u32 = 27;
-const OP_CLAMP: u32 = 28;
-const OP_SIGN: u32 = 29;
-const OP_FLOOR: u32 = 30;
-const OP_CEIL: u32 = 31;
-const OP_ROUND: u32 = 32;
-const OP_NEGATE: u32 = 33;
-const OP_STEP: u32 = 34;
-const OP_RECIPROCAL: u32 = 35;
-const OP_INVERT: u32 = 36;
+const OP_ACOS: u32 = 18;
+const OP_ASIN: u32 = 19;
+const OP_ATAN: u32 = 20;
+const OP_SINH: u32 = 21;
+const OP_COSH: u32 = 22;
+const OP_TANH: u32 = 23;
+const OP_MIN: u32 = 24;
+const OP_MAX: u32 = 25;
+const OP_CLAMP: u32 = 26;
+const OP_SIGN: u32 = 27;
+const OP_FLOOR: u32 = 28;
+const OP_CEIL: u32 = 29;
+const OP_ROUND: u32 = 30;
+const OP_NEGATE: u32 = 31;
+const OP_STEP: u32 = 32;
+const OP_RECIPROCAL: u32 = 33;
+const OP_INVERT: u32 = 34;
 // Phase 3 operators
-const OP_VALUE_NOISE: u32 = 37;
-const OP_FBM: u32 = 38;
-const OP_WARP_X: u32 = 39;
-const OP_WARP_Y: u32 = 40;
-const OP_MIRROR_X: u32 = 41;
-const OP_MIRROR_Y: u32 = 42;
+const OP_VALUE_NOISE: u32 = 35;
+const OP_FBM: u32 = 36;
+const OP_MIRROR_X: u32 = 37;
+const OP_MIRROR_Y: u32 = 38;
+// New operators
+const OP_ATAN2: u32 = 39;
+const OP_MOD: u32 = 40;
+const OP_WORLEY: u32 = 41;
+const OP_TRIWAVE: u32 = 42;
+const OP_CHEBYSHEV: u32 = 43;
+const OP_MANHATTAN: u32 = 44;
+const OP_SINFOLD: u32 = 45;
+const OP_PALETTE_T: u32 = 46;
 
 // Maximum stack depth for interpreter (auto-generated from config.rs)
 const MAX_STACK: u32 = 256;
@@ -71,7 +76,7 @@ struct OutputInfo {
     tile_h: u32,
 };
 
-// Flat storage buffer of all instructions
+// Flat storage buffer of all instructions (6 genomes: H S V H_remap S_remap V_remap)
 @group(0) @binding(0)
 var<storage> all_instructions: array<Instruction>;
 
@@ -79,74 +84,7 @@ var<storage> all_instructions: array<Instruction>;
 var<uniform> output_info: OutputInfo;
 
 @group(0) @binding(2)
-var<storage> palettes: array<u32>;
-
-@group(0) @binding(3)
 var<storage, read_write> output: array<vec4<f32>>;
-
-// Apply palette to HSV values
-fn apply_palette(palette_type: u32, h: f32, s: f32, v: f32) -> vec3<f32> {
-    var eff_h = h;
-    var eff_s = s;
-
-    switch (palette_type) {
-        case 0u { // RawHsv
-            eff_s = clamp(s, 0.1, 1.0);
-        }
-        case 1u { // Monochromatic
-            eff_h = 0.6;
-            eff_s = clamp(s * 0.5, 0.1, 1.0);
-        }
-        case 2u { // Analogous
-            let spread = s * 0.15;
-            eff_h = fract(h + spread);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 3u { // Complementary
-            let toggle = select(0.0, 0.5, s > 0.5);
-            eff_h = fract(h + toggle);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 4u { // SplitComplementary
-            var offset: f32 = 0.0;
-            if (s < 0.33) { offset = 0.0; }
-            else if (s < 0.66) { offset = 0.38; }
-            else { offset = 0.62; }
-            eff_h = fract(h + offset);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 5u { // Triadic
-            var band = u32(floor(s * 3.0));
-            var offset: f32 = 0.0;
-            if (band == 0u) { offset = 0.0; }
-            else if (band == 1u) { offset = 0.333; }
-            else { offset = 0.666; }
-            eff_h = fract(h + offset);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 6u { // Ocean - blues and teals
-            eff_h = 0.5 + h * 0.17;
-            eff_s = clamp(s, 0.4, 1.0);
-        }
-        case 7u { // Fire - reds, oranges, yellows
-            eff_h = h * 0.15;
-            eff_s = clamp(s, 0.5, 1.0);
-        }
-        case 8u { // Forest - greens and browns
-            eff_h = 0.2 + h * 0.15;
-            eff_s = clamp(s, 0.3, 0.8);
-        }
-        case 9u { // Sunset - warm gradient
-            eff_h = h * 0.12;
-            eff_s = clamp(s, 0.4, 1.0);
-        }
-        default {
-            eff_s = clamp(s, 0.1, 1.0);
-        }
-    }
-
-    return vec3<f32>(eff_h, eff_s, v);
-}
 
 // HSV to RGB conversion
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> vec3<f32> {
@@ -173,8 +111,9 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> vec3<f32> {
     return rgb;
 }
 
-// Bytecode interpreter - evaluates a genome at given coordinates
-fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
+// Bytecode interpreter - evaluates a genome at given coordinates.
+// t = raw channel value; used only by palette remap genomes (OP_PALETTE_T).
+fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
     var stack: array<f32, MAX_STACK>;
     var sp: u32 = 0u;
 
@@ -282,17 +221,6 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
                     let t = clamp((stack[c_idx] - stack[a_idx]) / (stack[b_idx] - stack[a_idx]), 0.0, 1.0);
                     result = t * t * (3.0 - 2.0 * t);
                 } else { result = 0.0; }
-            }
-            case OP_LENGTH {
-                let idx = u32(instr.a);
-                if (idx < sp) { result = abs(stack[idx]); }
-                else { result = 0.0; }
-            }
-            case OP_DOT {
-                let a_idx = u32(instr.a);
-                let b_idx = u32(instr.b);
-                if (a_idx < sp && b_idx < sp) { result = stack[a_idx] * stack[b_idx]; }
-                else { result = 0.0; }
             }
             // Phase 2 operators
             case OP_ACOS {
@@ -438,24 +366,75 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
                     if (max_val > 0.0) { result = value / max_val; } else { result = 0.0; }
                 } else { result = 0.0; }
             }
-            case OP_WARP_X {
-                let a_idx = u32(instr.a);
-                let b_idx = u32(instr.b);
-                if (a_idx < sp && b_idx < sp) { result = stack[a_idx] + stack[b_idx]; }
-                else { result = 0.0; }
-            }
-            case OP_WARP_Y {
-                let a_idx = u32(instr.a);
-                let b_idx = u32(instr.b);
-                if (a_idx < sp && b_idx < sp) { result = stack[a_idx] + stack[b_idx]; }
-                else { result = 0.0; }
-            }
             case OP_MIRROR_X {
                 result = abs(nx);
             }
             case OP_MIRROR_Y {
                 result = abs(ny);
             }
+            // New operators
+            case OP_ATAN2 {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) { result = atan2(stack[a_idx], stack[b_idx]); }
+                else { result = 0.0; }
+            }
+            case OP_MOD {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) {
+                    let bv = stack[b_idx];
+                    if (abs(bv) > 1e-6) { result = stack[a_idx] - bv * floor(stack[a_idx] / bv); }
+                    else { result = 0.0; }
+                } else { result = 0.0; }
+            }
+            case OP_WORLEY {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) {
+                    let vx = stack[a_idx];
+                    let vy = stack[b_idx];
+                    let xi = floor(vx);
+                    let yi = floor(vy);
+                    var min_dist: f32 = 1e9;
+                    for (var dy: i32 = -1; dy <= 1; dy += 1) {
+                        for (var dx: i32 = -1; dx <= 1; dx += 1) {
+                            let cx = xi + f32(dx);
+                            let cy = yi + f32(dy);
+                            let h1 = (sin(cx * 127.1 + cy * 311.3) + 1.0) * 0.5;
+                            let h2 = (sin(cx * 269.5 + cy * 183.3) + 1.0) * 0.5;
+                            let px = cx + h1;
+                            let py = cy + h2;
+                            let d = sqrt((vx - px) * (vx - px) + (vy - py) * (vy - py));
+                            if (d < min_dist) { min_dist = d; }
+                        }
+                    }
+                    result = min(min_dist, 1.0);
+                } else { result = 0.0; }
+            }
+            case OP_TRIWAVE {
+                let idx = u32(instr.a);
+                if (idx < sp) { result = abs(fract(stack[idx] * 0.5) * 2.0 - 1.0); }
+                else { result = 0.0; }
+            }
+            case OP_CHEBYSHEV {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) { result = max(abs(stack[a_idx]), abs(stack[b_idx])); }
+                else { result = 0.0; }
+            }
+            case OP_MANHATTAN {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) { result = abs(stack[a_idx]) + abs(stack[b_idx]); }
+                else { result = 0.0; }
+            }
+            case OP_SINFOLD {
+                let idx = u32(instr.a);
+                if (idx < sp) { result = sin(stack[idx] * 3.14159265); }
+                else { result = 0.0; }
+            }
+            case OP_PALETTE_T { result = t; }
             default { result = 0.0; }
         }
 
@@ -488,30 +467,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Tile index in grid (grid_cols = 4)
     let tile_idx = tile_y * 4u + tile_x;
-
-    // Individual index (0-15)
     let ind_idx = tile_idx;
 
-    // Genome indices for H, S, V channels
-    let h_genome_idx = ind_idx * 3u;
-    let s_genome_idx = ind_idx * 3u + 1u;
-    let v_genome_idx = ind_idx * 3u + 2u;
+    // 6 genomes per individual: H, S, V spatial + H, S, V remap
+    let h_genome_idx  = ind_idx * 6u;
+    let s_genome_idx  = ind_idx * 6u + 1u;
+    let v_genome_idx  = ind_idx * 6u + 2u;
+    let hr_genome_idx = ind_idx * 6u + 3u;
+    let sr_genome_idx = ind_idx * 6u + 4u;
+    let vr_genome_idx = ind_idx * 6u + 5u;
 
     // Normalize coordinates to [-1, 1]
     let nx = f32(local_x) / f32(tile_w) * 2.0 - 1.0;
     let ny = f32(local_y) / f32(tile_h) * 2.0 - 1.0;
 
-    // Evaluate H, S, V channels using the interpreter
-    let h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
-    let s = evaluate(s_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
-    let v = evaluate(v_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
+    // Stage 1: spatial evaluation (t unused, pass 0.0)
+    let raw_h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
+    let raw_s = evaluate(s_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
+    let raw_v = evaluate(v_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
 
-    // Apply palette (palette index matches individual index)
-    let palette_type = palettes[ind_idx];
-    let hsv = apply_palette(palette_type, h, s, v);
+    // Stage 2: palette remap (t = raw channel value; nx/ny unused in pure 1D remaps)
+    let h = evaluate(hr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_h);
+    let s = evaluate(sr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_s);
+    let v = evaluate(vr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_v);
 
     // Convert to RGB and output
-    let rgb = hsv_to_rgb(hsv.x, hsv.y, hsv.z);
+    let rgb = hsv_to_rgb(h, s, v);
     let out_idx = global_id.y * output_info.width + global_id.x;
     output[out_idx] = vec4<f32>(rgb, 1.0);
 }

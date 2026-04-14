@@ -16,7 +16,13 @@ pub struct Individual {
     pub h: Genome,
     pub s: Genome,
     pub v: Genome,
-    pub palette: PaletteType,
+    pub h_remap: Genome,
+    pub s_remap: Genome,
+    pub v_remap: Genome,
+}
+
+fn identity_remap() -> Genome {
+    Genome::new(Node::terminal(galapagos3::genome::OpCode::PaletteT))
 }
 
 impl Individual {
@@ -25,29 +31,20 @@ impl Individual {
             h: Genome::new(Node::random_with_depth(rng, max_depth)),
             s: Genome::new(Node::random_with_depth(rng, max_depth)),
             v: Genome::new(Node::random_with_depth(rng, max_depth)),
-            palette: PaletteType::random(rng),
+            h_remap: identity_remap(),
+            s_remap: identity_remap(),
+            v_remap: identity_remap(),
         }
     }
 
     async fn render_tile_gpu(&self, renderer: &GpuRenderer) -> Result<Vec<u32>, galapagos3::renderer::RenderError> {
-        let h_raw: Vec<(u32, i32, i32, i32, f32)> = self.h.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
-        let s_raw: Vec<(u32, i32, i32, i32, f32)> = self.s.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
-        let v_raw: Vec<(u32, i32, i32, i32, f32)> = self.v.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
-
-        let palette_idx: u32 = match self.palette {
-            PaletteType::RawHsv => 0,
-            PaletteType::Monochromatic => 1,
-            PaletteType::Analogous => 2,
-            PaletteType::Complementary => 3,
-            PaletteType::SplitComplementary => 4,
-            PaletteType::Triadic => 5,
-            PaletteType::Ocean => 6,
-            PaletteType::Fire => 7,
-            PaletteType::Forest => 8,
-            PaletteType::Sunset => 9,
+        let raw = |g: &Genome| -> Vec<(u32, i32, i32, i32, f32)> {
+            g.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect()
         };
-
-        renderer.render_tile_from_raw(&h_raw, &s_raw, &v_raw, palette_idx).await
+        renderer.render_tile_from_raw(
+            &raw(&self.h), &raw(&self.s), &raw(&self.v),
+            &raw(&self.h_remap), &raw(&self.s_remap), &raw(&self.v_remap),
+        ).await
     }
 
     pub fn render_tile_cpu(&self) -> Vec<u32> {
@@ -56,72 +53,20 @@ impl Individual {
             for x in 0..config::TILE_W {
                 let nx = x as f32 / config::TILE_W as f32 * 2.0 - 1.0;
                 let ny = y as f32 / config::TILE_H as f32 * 2.0 - 1.0;
-                let h = (self.h.eval(nx, ny).fract() + 1.0).fract();
-                let s = (self.s.eval(nx, ny).fract() + 1.0).fract();
-                let v = (self.v.eval(nx, ny).fract() + 1.0).fract();
-                let (h, s, v) = self.palette.apply(h, s, v);
+                // Stage 1: spatial evaluation
+                let raw_h = (self.h.eval(nx, ny, 0.0).fract() + 1.0).fract();
+                let raw_s = (self.s.eval(nx, ny, 0.0).fract() + 1.0).fract();
+                let raw_v = (self.v.eval(nx, ny, 0.0).fract() + 1.0).fract();
+                // Stage 2: palette remap (t = raw channel value)
+                let h = (self.h_remap.eval(0.0, 0.0, raw_h).fract() + 1.0).fract();
+                let s = (self.s_remap.eval(0.0, 0.0, raw_s).fract() + 1.0).fract();
+                let v = (self.v_remap.eval(0.0, 0.0, raw_v).fract() + 1.0).fract();
                 let [r, g, b] = hsv_to_rgb(h, s, v);
                 pixels[(y as usize) * config::TILE_W as usize + x as usize] =
                     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
             }
         }
         pixels
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum PaletteType {
-    RawHsv,
-    Monochromatic,
-    Analogous,
-    Complementary,
-    SplitComplementary,
-    Triadic,
-    Ocean,
-    Fire,
-    Forest,
-    Sunset,
-}
-
-impl PaletteType {
-    pub fn random(rng: &mut impl Rng) -> Self {
-        match rng.gen_range(0..10) {
-            0 => PaletteType::RawHsv,
-            1 => PaletteType::Monochromatic,
-            2 => PaletteType::Analogous,
-            3 => PaletteType::Complementary,
-            4 => PaletteType::SplitComplementary,
-            5 => PaletteType::Triadic,
-            6 => PaletteType::Ocean,
-            7 => PaletteType::Fire,
-            8 => PaletteType::Forest,
-            _ => PaletteType::Sunset,
-        }
-    }
-
-    pub fn apply(&self, h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-        match self {
-            PaletteType::RawHsv => (h, s.clamp(0.1, 1.0), v),
-            PaletteType::Monochromatic => (0.6, (s * 0.5).clamp(0.1, 1.0), v),
-            PaletteType::Analogous => ((h + s * 0.15).fract(), s.clamp(0.3, 1.0), v),
-            PaletteType::Complementary => {
-                let toggle = if s > 0.5 { 0.5 } else { 0.0 };
-                ((h + toggle).fract(), s.clamp(0.3, 1.0), v)
-            }
-            PaletteType::SplitComplementary => {
-                let offset = if s < 0.33 { 0.0 } else if s < 0.66 { 0.38 } else { 0.62 };
-                ((h + offset).fract(), s.clamp(0.3, 1.0), v)
-            }
-            PaletteType::Triadic => {
-                let band = (s * 3.0) as i32;
-                let offset = match band { 0 => 0.0, 1 => 0.333, _ => 0.666 };
-                ((h + offset).fract(), s.clamp(0.3, 1.0), v)
-            }
-            PaletteType::Ocean => (0.5 + h * 0.17, s.clamp(0.4, 1.0), v),
-            PaletteType::Fire => (h * 0.15, s.clamp(0.5, 1.0), v),
-            PaletteType::Forest => (0.2 + h * 0.15, s.clamp(0.3, 0.8), v),
-            PaletteType::Sunset => (h * 0.12, s.clamp(0.4, 1.0), v),
-        }
     }
 }
 
@@ -202,20 +147,22 @@ pub fn evolve_population(
         let pa = &pop[sel[rng.gen_range(0..sel.len())]];
         if sel.len() > 1 && rng.gen_bool(0.3) {
             let pb = &pop[sel[rng.gen_range(0..sel.len())]];
-            let palette = if rng.gen_bool(0.5) { pa.palette } else { pb.palette };
             next.push(Individual {
                 h: evolution::crossover(&pa.h, &pb.h, rng),
                 s: evolution::crossover(&pa.s, &pb.s, rng),
                 v: evolution::crossover(&pa.v, &pb.v, rng),
-                palette,
+                h_remap: evolution::crossover(&pa.h_remap, &pb.h_remap, rng),
+                s_remap: evolution::crossover(&pa.s_remap, &pb.s_remap, rng),
+                v_remap: evolution::crossover(&pa.v_remap, &pb.v_remap, rng),
             });
         } else {
-            let palette = if rng.gen_bool(0.1) { PaletteType::random(rng) } else { pa.palette };
             next.push(Individual {
                 h: evolution::mutate_with_params(&pa.h, rng, &params),
                 s: evolution::mutate_with_params(&pa.s, rng, &params),
                 v: evolution::mutate_with_params(&pa.v, rng, &params),
-                palette,
+                h_remap: evolution::mutate_palette_with_params(&pa.h_remap, rng, &params),
+                s_remap: evolution::mutate_palette_with_params(&pa.s_remap, rng, &params),
+                v_remap: evolution::mutate_palette_with_params(&pa.v_remap, rng, &params),
             });
         }
     }
@@ -237,6 +184,9 @@ pub struct App {
     rt_config: RuntimeConfig,
     generation: usize,
     needs_render: bool,
+    settings_open: bool,
+    zoom_tile: Option<usize>,
+    hovered_tile: Option<usize>,
 }
 
 impl App {
@@ -274,6 +224,9 @@ impl App {
             rt_config,
             generation: 0,
             needs_render: true,
+            settings_open: false,
+            zoom_tile: None,
+            hovered_tile: None,
         }
     }
 
@@ -368,6 +321,44 @@ impl App {
         img.save(&filename).expect("Failed to save PNG");
         println!("Saved {filename}");
     }
+
+    pub fn do_save_zoomed(&mut self, idx: usize) {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        std::fs::create_dir_all("output").unwrap();
+
+        // PNG — single tile, no border
+        let pixels = &self.tiles[idx];
+        let mut img = image::RgbaImage::new(config::TILE_W, config::TILE_H);
+        for y in 0..config::TILE_H as usize {
+            for x in 0..config::TILE_W as usize {
+                let px = pixels[y * config::TILE_W as usize + x];
+                img.put_pixel(x as u32, y as u32, image::Rgba([
+                    ((px >> 16) & 0xFF) as u8,
+                    ((px >> 8) & 0xFF) as u8,
+                    (px & 0xFF) as u8,
+                    255,
+                ]));
+            }
+        }
+        let png_path = format!("output/{ts:019}_{idx}.png");
+        img.save(&png_path).expect("Failed to save PNG");
+
+        // Expression text
+        let ind = &self.pop[idx];
+        let text = format!(
+            "H:       {}\nS:       {}\nV:       {}\nH_remap: {}\nS_remap: {}\nV_remap: {}\n",
+            ind.h.to_expr_string(),
+            ind.s.to_expr_string(),
+            ind.v.to_expr_string(),
+            ind.h_remap.to_expr_string(),
+            ind.s_remap.to_expr_string(),
+            ind.v_remap.to_expr_string(),
+        );
+        let txt_path = format!("output/{ts:019}_{idx}.txt");
+        std::fs::write(&txt_path, &text).expect("Failed to save expression text");
+
+        println!("Saved {png_path} + {txt_path}");
+    }
 }
 
 impl eframe::App for App {
@@ -397,75 +388,147 @@ impl eframe::App for App {
                     self.do_randomize();
                 }
                 if ui.button("💾 Save").clicked()
-                    || ctx.input(|i| i.key_pressed(egui::Key::S))
+                    || (self.zoom_tile.is_none() && ctx.input(|i| i.key_pressed(egui::Key::S)))
                 {
                     self.do_save();
                 }
+                // Z: zoom tile under mouse; Escape: exit zoom
+                if ctx.input(|i| i.key_pressed(egui::Key::Z)) {
+                    if self.zoom_tile.is_some() {
+                        self.zoom_tile = None;
+                    } else {
+                        self.zoom_tile = self.hovered_tile;
+                    }
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.zoom_tile = None;
+                }
                 ui.separator();
                 ui.label(format!("Gen {} | {} selected", self.generation, sel_count));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.toggle_value(&mut self.settings_open, "⚙ Settings");
+                });
             });
         });
 
-        // ── Parameter panel ──────────────────────────────────────────────────
-        egui::Panel::left("settings")
-            .resizable(false)
-            .exact_size(config::SETTINGS_PANEL_WIDTH)
-            .show_inside(ui, |ui| {
-                ui.heading("Evolution");
-                ui.add(egui::Slider::new(&mut self.rt_config.subtree_mutation_prob, 0.0..=1.0)
-                    .text("SubtreeMut"));
-                ui.add(egui::Slider::new(&mut self.rt_config.subtree_stop_prob, 0.0..=1.0)
-                    .text("SubtreeStop"));
-                ui.add(egui::Slider::new(&mut self.rt_config.binary_child_side_prob, 0.0..=1.0)
-                    .text("BinarySide"));
-                ui.add(egui::DragValue::new(&mut self.rt_config.fresh_random_count)
-                    .range(0..=(config::POP_SIZE / 2))
-                    .prefix("FreshRand: "));
-                ui.add(egui::DragValue::new(&mut self.rt_config.max_tree_depth)
-                    .range(1..=15usize)
-                    .prefix("MaxDepth: "));
-            });
-
-        // ── Tile grid ────────────────────────────────────────────────────────
-        egui::CentralPanel::no_frame().show_inside(ui, |ui| {
-            egui::Grid::new("tiles")
-                .num_columns(config::GRID_COLS)
-                .spacing([config::GRID_TILE_SPACING, config::GRID_TILE_SPACING])
-                .show(ui, |ui| {
-                    for i in 0..self.tile_textures.len() {
-                        let handle = &self.tile_textures[i];
-                        let response = ui.add(
-                            egui::Image::new(handle)
-                                .fit_to_exact_size(egui::vec2(
-                                    config::TILE_W as f32,
-                                    config::TILE_H as f32,
-                                ))
-                                .sense(egui::Sense::click()),
-                        );
-                        if response.clicked() {
-                            self.selected[i] = !self.selected[i];
-                        }
-                        if self.selected[i] {
-                            let (r, g, b) = config::SEL_COLOR;
-                            ui.painter().rect_stroke(
-                                response.rect,
-                                0.0,
-                                egui::Stroke::new(
-                                    config::BORDER_WIDTH as f32,
-                                    egui::Color32::from_rgb(
-                                        (r * 255.0) as u8,
-                                        (g * 255.0) as u8,
-                                        (b * 255.0) as u8,
-                                    ),
-                                ),
-                                egui::StrokeKind::Outside,
-                            );
-                        }
-                        if (i + 1) % config::GRID_COLS == 0 {
-                            ui.end_row();
-                        }
-                    }
+        // ── Settings floating window ─────────────────────────────────────────
+        if self.settings_open {
+            egui::Window::new("Settings")
+                .resizable(false)
+                .collapsible(false)
+                .show(&ctx, |ui| {
+                    ui.heading("Evolution");
+                    ui.add(egui::Slider::new(&mut self.rt_config.subtree_mutation_prob, 0.0..=1.0)
+                        .text("SubtreeMut"));
+                    ui.add(egui::Slider::new(&mut self.rt_config.subtree_stop_prob, 0.0..=1.0)
+                        .text("SubtreeStop"));
+                    ui.add(egui::Slider::new(&mut self.rt_config.binary_child_side_prob, 0.0..=1.0)
+                        .text("BinarySide"));
+                    ui.add(egui::DragValue::new(&mut self.rt_config.fresh_random_count)
+                        .range(0..=(config::POP_SIZE / 2))
+                        .prefix("FreshRand: "));
+                    ui.add(egui::DragValue::new(&mut self.rt_config.max_tree_depth)
+                        .range(1..=15usize)
+                        .prefix("MaxDepth: "));
                 });
+        }
+
+        // ── Main view — zoom or tile grid ────────────────────────────────────
+        egui::CentralPanel::no_frame().show_inside(ui, |ui| {
+            if let Some(idx) = self.zoom_tile {
+                // Zoom view: tile fills available space
+                let avail = ui.available_size();
+                let panel_rect = ui.available_rect_before_wrap();
+                if idx < self.tile_textures.len() {
+                    let painter = ui.painter().clone();
+                    ui.centered_and_justified(|ui| {
+                        ui.add(
+                            egui::Image::new(&self.tile_textures[idx])
+                                .fit_to_exact_size(avail),
+                        );
+                    });
+                    painter.text(
+                        egui::pos2(panel_rect.center().x, panel_rect.bottom() - 24.0),
+                        egui::Align2::CENTER_CENTER,
+                        "S to save  |  Z or Esc to return",
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::from_rgba_unmultiplied(200, 200, 200, 180),
+                    );
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::S)) {
+                    self.do_save_zoomed(idx);
+                }
+            } else {
+                let avail = ui.available_size();
+                let cols = config::GRID_COLS as f32;
+                let rows = config::GRID_ROWS as f32;
+                let native_w = config::TILE_W as f32;
+                let native_h = config::TILE_H as f32;
+                const MIN_GAP: f32 = 2.0;
+
+                // Scale tiles DOWN if the screen is too small to fit at native resolution.
+                // Never scale UP — upscaling makes images blurry.
+                let scale = ((avail.x - MIN_GAP * (cols + 1.0)) / (cols * native_w))
+                    .min((avail.y - MIN_GAP * (rows + 1.0)) / (rows * native_h))
+                    .min(1.0)
+                    .max(0.01);
+                let tile_w = (native_w * scale).floor();
+                let tile_h = (native_h * scale).floor();
+
+                // Distribute all remaining space equally as gaps (outer + inner).
+                // cols+1 gaps horizontally, rows+1 gaps vertically → gallery-style matting.
+                let gap_x = ((avail.x - cols * tile_w) / (cols + 1.0)).max(MIN_GAP).floor();
+                let gap_y = ((avail.y - rows * tile_h) / (rows + 1.0)).max(MIN_GAP).floor();
+
+                // Outer left/top padding equals the inter-tile gap for uniform matting.
+                let mut new_hovered: Option<usize> = None;
+                ui.add_space(gap_y);
+                ui.horizontal(|ui| {
+                    ui.add_space(gap_x);
+                    egui::Grid::new("tiles")
+                        .num_columns(config::GRID_COLS)
+                        .spacing([gap_x, gap_y])
+                        .show(ui, |ui| {
+                            let tile_size = egui::vec2(tile_w, tile_h);
+                            for i in 0..self.tile_textures.len() {
+                                let handle = &self.tile_textures[i];
+                                let response = ui.add(
+                                    egui::Image::new(handle)
+                                        .fit_to_exact_size(tile_size)
+                                        .sense(egui::Sense::click()),
+                                );
+                                if response.hovered() {
+                                    new_hovered = Some(i);
+                                }
+                                if response.double_clicked() {
+                                    self.zoom_tile = Some(i);
+                                } else if response.clicked() {
+                                    self.selected[i] = !self.selected[i];
+                                }
+                                if self.selected[i] {
+                                    let (r, g, b) = config::SEL_COLOR;
+                                    ui.painter().rect_stroke(
+                                        response.rect,
+                                        0.0,
+                                        egui::Stroke::new(
+                                            config::BORDER_WIDTH as f32,
+                                            egui::Color32::from_rgb(
+                                                (r * 255.0) as u8,
+                                                (g * 255.0) as u8,
+                                                (b * 255.0) as u8,
+                                            ),
+                                        ),
+                                        egui::StrokeKind::Outside,
+                                    );
+                                }
+                                if (i + 1) % config::GRID_COLS == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                });
+                self.hovered_tile = new_hovered;
+            }
         });
     }
 }

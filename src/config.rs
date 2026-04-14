@@ -32,8 +32,8 @@ pub const GRID_COLS: usize = 4;
 pub const GRID_ROWS: usize = 4;
 
 /// Tile rendering dimensions in pixels.
-pub const TILE_W: u32 = 512;
-pub const TILE_H: u32 = 256;
+pub const TILE_W: u32 = 1920;
+pub const TILE_H: u32 = 1080;
 
 /// Border width around each tile in saved output images.
 pub const OUTPUT_BORDER_WIDTH: u32 = 16;
@@ -78,15 +78,10 @@ pub const FRESH_RANDOM_COUNT: usize = 2;
 // UI LAYOUT
 // ============================================================================
 
-/// Width of the left settings panel in the egui UI (pixels).
-pub const SETTINGS_PANEL_WIDTH: f32 = 220.0;
-
-/// Pixel gap between tiles in the egui Grid widget.
-pub const GRID_TILE_SPACING: f32 = 4.0;
-
 // ============================================================================
 // GPU RENDERING
 // ============================================================================
 
 /// GPU supersampling factor for anti-aliasing.
-pub const SUPERSAMPLE_FACTOR: u32 = 4;
+/// At 1080p native resolution, SSAA=1 gives the same GPU pixel budget as the old 512×256×4.
+pub const SUPERSAMPLE_FACTOR: u32 = 1;

@@ -54,9 +54,10 @@ impl Node {
             return Self::random_terminal(rng);
         }
 
-        // Pick a non-terminal op from registry (skip X, Y, Const)
+        // Pick a non-terminal op from registry (skip X, Y, Const, PaletteT — PaletteT is only
+        // meaningful in palette genomes where t holds the raw channel value)
         let eligible: Vec<&crate::genome::op::OpDef> = OP_REGISTRY.iter()
-            .filter(|def| !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::Const))
+            .filter(|def| !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::Const | OpCode::PaletteT))
             .collect();
         let def = eligible[rng.gen_range(0..eligible.len())];
         let child_budget = max_size.saturating_sub(1);
@@ -91,29 +92,85 @@ impl Node {
         }
     }
 
-    pub fn eval(&self, x: f32, y: f32) -> f32 {
+    pub fn eval(&self, x: f32, y: f32, t: f32) -> f32 {
         let def = op_def(self.op);
         match &def.eval {
+            EvalFn::PaletteTVal => t,
             EvalFn::Nullary(f) => f(x, y, self.value),
             EvalFn::Unary(f) => {
-                let a = self.children.first().map_or(0.0, |c| c.eval(x, y));
+                let a = self.children.first().map_or(0.0, |c| c.eval(x, y, t));
                 f(a)
             }
             EvalFn::Binary(f) => {
-                let a = self.children.first().map_or(0.0, |c| c.eval(x, y));
-                let b = self.children.get(1).map_or(0.0, |c| c.eval(x, y));
+                let a = self.children.first().map_or(0.0, |c| c.eval(x, y, t));
+                let b = self.children.get(1).map_or(0.0, |c| c.eval(x, y, t));
                 f(a, b)
             }
             EvalFn::Ternary(f) => {
-                let a = self.children.first().map_or(0.0, |c| c.eval(x, y));
-                let b = self.children.get(1).map_or(0.0, |c| c.eval(x, y));
-                let c = self.children.get(2).map_or(0.0, |c| c.eval(x, y));
+                let a = self.children.first().map_or(0.0, |c| c.eval(x, y, t));
+                let b = self.children.get(1).map_or(0.0, |c| c.eval(x, y, t));
+                let c = self.children.get(2).map_or(0.0, |c| c.eval(x, y, t));
                 f(a, b, c)
             }
             EvalFn::BinaryLiteral(f) => {
-                let a = self.children.first().map_or(0.0, |c| c.eval(x, y));
-                let b = self.children.get(1).map_or(0.0, |c| c.eval(x, y));
+                let a = self.children.first().map_or(0.0, |c| c.eval(x, y, t));
+                let b = self.children.get(1).map_or(0.0, |c| c.eval(x, y, t));
                 f(a, b, self.c_literal)
+            }
+        }
+    }
+
+    // ---- Palette genome generation (T is the only terminal) ----
+
+    pub fn random_palette(rng: &mut impl Rng) -> Self {
+        Self::random_palette_bounded(rng, config::MAX_TREE_DEPTH, config::MAX_TREE_SIZE)
+    }
+
+    fn random_palette_terminal(_rng: &mut impl Rng) -> Self {
+        Node::terminal(OpCode::PaletteT)
+    }
+
+    fn random_palette_bounded(rng: &mut impl Rng, max_depth: usize, max_size: usize) -> Self {
+        if max_size < config::MIN_TREE_SIZE || max_depth == 0 {
+            return Self::random_palette_terminal(rng);
+        }
+        if rng.gen_bool(0.01) {
+            return Self::random_palette_terminal(rng);
+        }
+
+        // Same eligible ops as spatial (skip X, Y, Const, PaletteT at the op-selection level;
+        // PaletteT will only appear as a leaf via random_palette_terminal)
+        let eligible: Vec<&crate::genome::op::OpDef> = OP_REGISTRY.iter()
+            .filter(|def| !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::Const | OpCode::PaletteT))
+            .collect();
+        let def = eligible[rng.gen_range(0..eligible.len())];
+        let child_budget = max_size.saturating_sub(1);
+
+        match def.arity {
+            Arity::Nullary => Node::terminal(def.opcode),
+            Arity::Unary => {
+                let child = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                Node::unary(def.opcode, child)
+            }
+            Arity::Binary => {
+                let a = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                let b = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                if def.opcode == OpCode::FBM {
+                    let mut node = Node::binary(def.opcode, a, b);
+                    node.c_literal = rng.gen_range(1..=6);
+                    return node;
+                }
+                Node::binary(def.opcode, a, b)
+            }
+            Arity::Ternary => {
+                let a = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                let b = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                if def.opcode == OpCode::Mix {
+                    let blend = Node::constant(rng.gen_range(0.0..1.0));
+                    return Node::ternary(def.opcode, a, b, blend);
+                }
+                let c = Self::random_palette_bounded(rng, max_depth - 1, child_budget);
+                Node::ternary(def.opcode, a, b, c)
             }
         }
     }
