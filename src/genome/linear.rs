@@ -53,6 +53,7 @@ pub enum OpCode {
     Chebyshev = 43,
     Manhattan = 44,
     SinFold = 45,
+    PaletteT = 46,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -111,7 +112,7 @@ impl Genome {
         }
     }
 
-    pub fn eval(&self, x: f32, y: f32) -> f32 {
+    pub fn eval(&self, x: f32, y: f32, t: f32) -> f32 {
         let mut stack = vec![0.0; MAX_INSTRUCTIONS];
         let mut used = 0;
 
@@ -124,6 +125,10 @@ impl Genome {
             let def = op_def(instr.op);
 
             match &def.eval {
+                EvalFn::PaletteTVal => {
+                    stack[used] = t;
+                    used += 1;
+                }
                 EvalFn::Nullary(f) => {
                     stack[used] = f(x, y, instr.value);
                     used += 1;

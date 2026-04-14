@@ -21,6 +21,8 @@ impl Arity {
 
 /// CPU eval dispatch — variant determines how stack values map to the function.
 pub enum EvalFn {
+    /// Reads the current palette channel value t from evaluation context
+    PaletteTVal,
     /// f(x, y, stored_value) for coordinate inputs and constants
     Nullary(fn(f32, f32, f32) -> f32),
     /// f(a) for single-input ops
@@ -147,7 +149,7 @@ fn eval_fbm(vx: f32, vy: f32, octaves: i32) -> f32 {
 // To disable an op: comment out or remove its line.
 // ============================================================================
 
-pub static OP_REGISTRY: [OpDef; 46] = [
+pub static OP_REGISTRY: [OpDef; 47] = [
     // Phase 1: Core
     OpDef { opcode: OpCode::X,          name: "X",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_x) },
     OpDef { opcode: OpCode::Y,          name: "Y",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_y) },
@@ -198,6 +200,7 @@ pub static OP_REGISTRY: [OpDef; 46] = [
     OpDef { opcode: OpCode::Chebyshev,  name: "Chebyshev",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_chebyshev) },
     OpDef { opcode: OpCode::Manhattan,  name: "Manhattan",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_manhattan) },
     OpDef { opcode: OpCode::SinFold,    name: "SinFold",    arity: Arity::Unary,    eval: EvalFn::Unary(eval_sinfold) },
+    OpDef { opcode: OpCode::PaletteT,   name: "PaletteT",   arity: Arity::Nullary,  eval: EvalFn::PaletteTVal },
 ];
 
 /// Look up an op's definition by opcode. Indexed by discriminant value.

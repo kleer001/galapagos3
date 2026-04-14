@@ -62,6 +62,7 @@ const OP_TRIWAVE: u32 = 42;
 const OP_CHEBYSHEV: u32 = 43;
 const OP_MANHATTAN: u32 = 44;
 const OP_SINFOLD: u32 = 45;
+const OP_PALETTE_T: u32 = 46;
 
 // Maximum stack depth for interpreter (auto-generated from config.rs)
 const MAX_STACK: u32 = 256;
@@ -75,7 +76,7 @@ struct OutputInfo {
     tile_h: u32,
 };
 
-// Flat storage buffer of all instructions
+// Flat storage buffer of all instructions (6 genomes: H S V H_remap S_remap V_remap)
 @group(0) @binding(0)
 var<storage> all_instructions: array<Instruction>;
 
@@ -83,74 +84,7 @@ var<storage> all_instructions: array<Instruction>;
 var<uniform> output_info: OutputInfo;
 
 @group(0) @binding(2)
-var<storage> palettes: array<u32>;
-
-@group(0) @binding(3)
 var<storage, read_write> output: array<vec4<f32>>;
-
-// Apply palette to HSV values
-fn apply_palette(palette_type: u32, h: f32, s: f32, v: f32) -> vec3<f32> {
-    var eff_h = h;
-    var eff_s = s;
-
-    switch (palette_type) {
-        case 0u { // RawHsv
-            eff_s = clamp(s, 0.1, 1.0);
-        }
-        case 1u { // Monochromatic
-            eff_h = 0.6;
-            eff_s = clamp(s * 0.5, 0.1, 1.0);
-        }
-        case 2u { // Analogous
-            let spread = s * 0.15;
-            eff_h = fract(h + spread);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 3u { // Complementary
-            let toggle = select(0.0, 0.5, s > 0.5);
-            eff_h = fract(h + toggle);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 4u { // SplitComplementary
-            var offset: f32 = 0.0;
-            if (s < 0.33) { offset = 0.0; }
-            else if (s < 0.66) { offset = 0.38; }
-            else { offset = 0.62; }
-            eff_h = fract(h + offset);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 5u { // Triadic
-            var band = u32(floor(s * 3.0));
-            var offset: f32 = 0.0;
-            if (band == 0u) { offset = 0.0; }
-            else if (band == 1u) { offset = 0.333; }
-            else { offset = 0.666; }
-            eff_h = fract(h + offset);
-            eff_s = clamp(s, 0.3, 1.0);
-        }
-        case 6u { // Ocean - blues and teals
-            eff_h = 0.5 + h * 0.17;
-            eff_s = clamp(s, 0.4, 1.0);
-        }
-        case 7u { // Fire - reds, oranges, yellows
-            eff_h = h * 0.15;
-            eff_s = clamp(s, 0.5, 1.0);
-        }
-        case 8u { // Forest - greens and browns
-            eff_h = 0.2 + h * 0.15;
-            eff_s = clamp(s, 0.3, 0.8);
-        }
-        case 9u { // Sunset - warm gradient
-            eff_h = h * 0.12;
-            eff_s = clamp(s, 0.4, 1.0);
-        }
-        default {
-            eff_s = clamp(s, 0.1, 1.0);
-        }
-    }
-
-    return vec3<f32>(eff_h, eff_s, v);
-}
 
 // HSV to RGB conversion
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> vec3<f32> {
@@ -177,8 +111,9 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> vec3<f32> {
     return rgb;
 }
 
-// Bytecode interpreter - evaluates a genome at given coordinates
-fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
+// Bytecode interpreter - evaluates a genome at given coordinates.
+// t = raw channel value; used only by palette remap genomes (OP_PALETTE_T).
+fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
     var stack: array<f32, MAX_STACK>;
     var sp: u32 = 0u;
 
@@ -499,6 +434,7 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32) -> f32 {
                 if (idx < sp) { result = sin(stack[idx] * 3.14159265); }
                 else { result = 0.0; }
             }
+            case OP_PALETTE_T { result = t; }
             default { result = 0.0; }
         }
 
@@ -531,30 +467,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Tile index in grid (grid_cols = 4)
     let tile_idx = tile_y * 4u + tile_x;
-
-    // Individual index (0-15)
     let ind_idx = tile_idx;
 
-    // Genome indices for H, S, V channels
-    let h_genome_idx = ind_idx * 3u;
-    let s_genome_idx = ind_idx * 3u + 1u;
-    let v_genome_idx = ind_idx * 3u + 2u;
+    // 6 genomes per individual: H, S, V spatial + H, S, V remap
+    let h_genome_idx  = ind_idx * 6u;
+    let s_genome_idx  = ind_idx * 6u + 1u;
+    let v_genome_idx  = ind_idx * 6u + 2u;
+    let hr_genome_idx = ind_idx * 6u + 3u;
+    let sr_genome_idx = ind_idx * 6u + 4u;
+    let vr_genome_idx = ind_idx * 6u + 5u;
 
     // Normalize coordinates to [-1, 1]
     let nx = f32(local_x) / f32(tile_w) * 2.0 - 1.0;
     let ny = f32(local_y) / f32(tile_h) * 2.0 - 1.0;
 
-    // Evaluate H, S, V channels using the interpreter
-    let h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
-    let s = evaluate(s_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
-    let v = evaluate(v_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny);
+    // Stage 1: spatial evaluation (t unused, pass 0.0)
+    let raw_h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
+    let raw_s = evaluate(s_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
+    let raw_v = evaluate(v_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
 
-    // Apply palette (palette index matches individual index)
-    let palette_type = palettes[ind_idx];
-    let hsv = apply_palette(palette_type, h, s, v);
+    // Stage 2: palette remap (t = raw channel value; nx/ny unused in pure 1D remaps)
+    let h = evaluate(hr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_h);
+    let s = evaluate(sr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_s);
+    let v = evaluate(vr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_v);
 
     // Convert to RGB and output
-    let rgb = hsv_to_rgb(hsv.x, hsv.y, hsv.z);
+    let rgb = hsv_to_rgb(h, s, v);
     let out_idx = global_id.y * output_info.width + global_id.x;
     output[out_idx] = vec4<f32>(rgb, 1.0);
 }

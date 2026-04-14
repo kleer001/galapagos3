@@ -16,7 +16,13 @@ pub struct Individual {
     pub h: Genome,
     pub s: Genome,
     pub v: Genome,
-    pub palette: PaletteType,
+    pub h_remap: Genome,
+    pub s_remap: Genome,
+    pub v_remap: Genome,
+}
+
+fn identity_remap() -> Genome {
+    Genome::new(Node::terminal(galapagos3::genome::OpCode::PaletteT))
 }
 
 impl Individual {
@@ -25,29 +31,20 @@ impl Individual {
             h: Genome::new(Node::random_with_depth(rng, max_depth)),
             s: Genome::new(Node::random_with_depth(rng, max_depth)),
             v: Genome::new(Node::random_with_depth(rng, max_depth)),
-            palette: PaletteType::random(rng),
+            h_remap: identity_remap(),
+            s_remap: identity_remap(),
+            v_remap: identity_remap(),
         }
     }
 
     async fn render_tile_gpu(&self, renderer: &GpuRenderer) -> Result<Vec<u32>, galapagos3::renderer::RenderError> {
-        let h_raw: Vec<(u32, i32, i32, i32, f32)> = self.h.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
-        let s_raw: Vec<(u32, i32, i32, i32, f32)> = self.s.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
-        let v_raw: Vec<(u32, i32, i32, i32, f32)> = self.v.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect();
-
-        let palette_idx: u32 = match self.palette {
-            PaletteType::RawHsv => 0,
-            PaletteType::Monochromatic => 1,
-            PaletteType::Analogous => 2,
-            PaletteType::Complementary => 3,
-            PaletteType::SplitComplementary => 4,
-            PaletteType::Triadic => 5,
-            PaletteType::Ocean => 6,
-            PaletteType::Fire => 7,
-            PaletteType::Forest => 8,
-            PaletteType::Sunset => 9,
+        let raw = |g: &Genome| -> Vec<(u32, i32, i32, i32, f32)> {
+            g.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect()
         };
-
-        renderer.render_tile_from_raw(&h_raw, &s_raw, &v_raw, palette_idx).await
+        renderer.render_tile_from_raw(
+            &raw(&self.h), &raw(&self.s), &raw(&self.v),
+            &raw(&self.h_remap), &raw(&self.s_remap), &raw(&self.v_remap),
+        ).await
     }
 
     pub fn render_tile_cpu(&self) -> Vec<u32> {
@@ -56,72 +53,20 @@ impl Individual {
             for x in 0..config::TILE_W {
                 let nx = x as f32 / config::TILE_W as f32 * 2.0 - 1.0;
                 let ny = y as f32 / config::TILE_H as f32 * 2.0 - 1.0;
-                let h = (self.h.eval(nx, ny).fract() + 1.0).fract();
-                let s = (self.s.eval(nx, ny).fract() + 1.0).fract();
-                let v = (self.v.eval(nx, ny).fract() + 1.0).fract();
-                let (h, s, v) = self.palette.apply(h, s, v);
+                // Stage 1: spatial evaluation
+                let raw_h = (self.h.eval(nx, ny, 0.0).fract() + 1.0).fract();
+                let raw_s = (self.s.eval(nx, ny, 0.0).fract() + 1.0).fract();
+                let raw_v = (self.v.eval(nx, ny, 0.0).fract() + 1.0).fract();
+                // Stage 2: palette remap (t = raw channel value)
+                let h = (self.h_remap.eval(0.0, 0.0, raw_h).fract() + 1.0).fract();
+                let s = (self.s_remap.eval(0.0, 0.0, raw_s).fract() + 1.0).fract();
+                let v = (self.v_remap.eval(0.0, 0.0, raw_v).fract() + 1.0).fract();
                 let [r, g, b] = hsv_to_rgb(h, s, v);
                 pixels[(y as usize) * config::TILE_W as usize + x as usize] =
                     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
             }
         }
         pixels
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum PaletteType {
-    RawHsv,
-    Monochromatic,
-    Analogous,
-    Complementary,
-    SplitComplementary,
-    Triadic,
-    Ocean,
-    Fire,
-    Forest,
-    Sunset,
-}
-
-impl PaletteType {
-    pub fn random(rng: &mut impl Rng) -> Self {
-        match rng.gen_range(0..10) {
-            0 => PaletteType::RawHsv,
-            1 => PaletteType::Monochromatic,
-            2 => PaletteType::Analogous,
-            3 => PaletteType::Complementary,
-            4 => PaletteType::SplitComplementary,
-            5 => PaletteType::Triadic,
-            6 => PaletteType::Ocean,
-            7 => PaletteType::Fire,
-            8 => PaletteType::Forest,
-            _ => PaletteType::Sunset,
-        }
-    }
-
-    pub fn apply(&self, h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-        match self {
-            PaletteType::RawHsv => (h, s.clamp(0.1, 1.0), v),
-            PaletteType::Monochromatic => (0.6, (s * 0.5).clamp(0.1, 1.0), v),
-            PaletteType::Analogous => ((h + s * 0.15).fract(), s.clamp(0.3, 1.0), v),
-            PaletteType::Complementary => {
-                let toggle = if s > 0.5 { 0.5 } else { 0.0 };
-                ((h + toggle).fract(), s.clamp(0.3, 1.0), v)
-            }
-            PaletteType::SplitComplementary => {
-                let offset = if s < 0.33 { 0.0 } else if s < 0.66 { 0.38 } else { 0.62 };
-                ((h + offset).fract(), s.clamp(0.3, 1.0), v)
-            }
-            PaletteType::Triadic => {
-                let band = (s * 3.0) as i32;
-                let offset = match band { 0 => 0.0, 1 => 0.333, _ => 0.666 };
-                ((h + offset).fract(), s.clamp(0.3, 1.0), v)
-            }
-            PaletteType::Ocean => (0.5 + h * 0.17, s.clamp(0.4, 1.0), v),
-            PaletteType::Fire => (h * 0.15, s.clamp(0.5, 1.0), v),
-            PaletteType::Forest => (0.2 + h * 0.15, s.clamp(0.3, 0.8), v),
-            PaletteType::Sunset => (h * 0.12, s.clamp(0.4, 1.0), v),
-        }
     }
 }
 
@@ -202,20 +147,22 @@ pub fn evolve_population(
         let pa = &pop[sel[rng.gen_range(0..sel.len())]];
         if sel.len() > 1 && rng.gen_bool(0.3) {
             let pb = &pop[sel[rng.gen_range(0..sel.len())]];
-            let palette = if rng.gen_bool(0.5) { pa.palette } else { pb.palette };
             next.push(Individual {
                 h: evolution::crossover(&pa.h, &pb.h, rng),
                 s: evolution::crossover(&pa.s, &pb.s, rng),
                 v: evolution::crossover(&pa.v, &pb.v, rng),
-                palette,
+                h_remap: evolution::crossover(&pa.h_remap, &pb.h_remap, rng),
+                s_remap: evolution::crossover(&pa.s_remap, &pb.s_remap, rng),
+                v_remap: evolution::crossover(&pa.v_remap, &pb.v_remap, rng),
             });
         } else {
-            let palette = if rng.gen_bool(0.1) { PaletteType::random(rng) } else { pa.palette };
             next.push(Individual {
                 h: evolution::mutate_with_params(&pa.h, rng, &params),
                 s: evolution::mutate_with_params(&pa.s, rng, &params),
                 v: evolution::mutate_with_params(&pa.v, rng, &params),
-                palette,
+                h_remap: evolution::mutate_palette_with_params(&pa.h_remap, rng, &params),
+                s_remap: evolution::mutate_palette_with_params(&pa.s_remap, rng, &params),
+                v_remap: evolution::mutate_palette_with_params(&pa.v_remap, rng, &params),
             });
         }
     }
