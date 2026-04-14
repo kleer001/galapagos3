@@ -383,54 +383,67 @@ impl eframe::App for App {
         // ── Tile grid — fills all remaining space ────────────────────────────
         egui::CentralPanel::no_frame().show_inside(ui, |ui| {
             let avail = ui.available_size();
-            let spacing = config::GRID_TILE_SPACING;
             let cols = config::GRID_COLS as f32;
             let rows = config::GRID_ROWS as f32;
-            let aspect = config::TILE_W as f32 / config::TILE_H as f32;
+            let native_w = config::TILE_W as f32;
+            let native_h = config::TILE_H as f32;
+            const MIN_GAP: f32 = 2.0;
 
-            // Fit tiles into available area while preserving render aspect ratio
-            let tile_w_from_width = ((avail.x - spacing * (cols - 1.0)) / cols).floor();
-            let tile_h_from_width = (tile_w_from_width / aspect).floor();
-            let tile_h_from_height = ((avail.y - spacing * (rows - 1.0)) / rows).floor();
-            let tile_h = tile_h_from_width.min(tile_h_from_height).max(1.0);
-            let tile_w = (tile_h * aspect).floor().max(1.0);
-            let tile_size = egui::vec2(tile_w, tile_h);
+            // Scale tiles DOWN if the screen is too small to fit at native resolution.
+            // Never scale UP — upscaling makes images blurry.
+            let scale = ((avail.x - MIN_GAP * (cols + 1.0)) / (cols * native_w))
+                .min((avail.y - MIN_GAP * (rows + 1.0)) / (rows * native_h))
+                .min(1.0)
+                .max(0.01);
+            let tile_w = (native_w * scale).floor();
+            let tile_h = (native_h * scale).floor();
 
-            egui::Grid::new("tiles")
-                .num_columns(config::GRID_COLS)
-                .spacing([spacing, spacing])
-                .show(ui, |ui| {
-                    for i in 0..self.tile_textures.len() {
-                        let handle = &self.tile_textures[i];
-                        let response = ui.add(
-                            egui::Image::new(handle)
-                                .fit_to_exact_size(tile_size)
-                                .sense(egui::Sense::click()),
-                        );
-                        if response.clicked() {
-                            self.selected[i] = !self.selected[i];
-                        }
-                        if self.selected[i] {
-                            let (r, g, b) = config::SEL_COLOR;
-                            ui.painter().rect_stroke(
-                                response.rect,
-                                0.0,
-                                egui::Stroke::new(
-                                    config::BORDER_WIDTH as f32,
-                                    egui::Color32::from_rgb(
-                                        (r * 255.0) as u8,
-                                        (g * 255.0) as u8,
-                                        (b * 255.0) as u8,
-                                    ),
-                                ),
-                                egui::StrokeKind::Outside,
+            // Distribute all remaining space equally as gaps (outer + inner).
+            // cols+1 gaps horizontally, rows+1 gaps vertically → gallery-style matting.
+            let gap_x = ((avail.x - cols * tile_w) / (cols + 1.0)).max(MIN_GAP).floor();
+            let gap_y = ((avail.y - rows * tile_h) / (rows + 1.0)).max(MIN_GAP).floor();
+
+            // Outer left/top padding equals the inter-tile gap for uniform matting.
+            ui.add_space(gap_y);
+            ui.horizontal(|ui| {
+                ui.add_space(gap_x);
+                egui::Grid::new("tiles")
+                    .num_columns(config::GRID_COLS)
+                    .spacing([gap_x, gap_y])
+                    .show(ui, |ui| {
+                        let tile_size = egui::vec2(tile_w, tile_h);
+                        for i in 0..self.tile_textures.len() {
+                            let handle = &self.tile_textures[i];
+                            let response = ui.add(
+                                egui::Image::new(handle)
+                                    .fit_to_exact_size(tile_size)
+                                    .sense(egui::Sense::click()),
                             );
+                            if response.clicked() {
+                                self.selected[i] = !self.selected[i];
+                            }
+                            if self.selected[i] {
+                                let (r, g, b) = config::SEL_COLOR;
+                                ui.painter().rect_stroke(
+                                    response.rect,
+                                    0.0,
+                                    egui::Stroke::new(
+                                        config::BORDER_WIDTH as f32,
+                                        egui::Color32::from_rgb(
+                                            (r * 255.0) as u8,
+                                            (g * 255.0) as u8,
+                                            (b * 255.0) as u8,
+                                        ),
+                                    ),
+                                    egui::StrokeKind::Outside,
+                                );
+                            }
+                            if (i + 1) % config::GRID_COLS == 0 {
+                                ui.end_row();
+                            }
                         }
-                        if (i + 1) % config::GRID_COLS == 0 {
-                            ui.end_row();
-                        }
-                    }
-                });
+                    });
+            });
         });
     }
 }
