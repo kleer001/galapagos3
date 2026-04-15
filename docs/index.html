@@ -40,14 +40,31 @@ h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.4rem; color: var(--ac
 /* ── Hero ── */
 #hero {
   border-bottom: 1px solid var(--border);
-  text-align: center; padding: 5rem 2rem 4rem; max-width: 100%;
+  max-width: 100%; display: flex; align-items: stretch; min-height: 380px;
+}
+.hero-left {
+  flex: 1; padding: 4rem 3rem 4rem 4rem;
+  display: flex; flex-direction: column; justify-content: center;
 }
 #hero h1 {
   font-size: 3rem; font-weight: 800; letter-spacing: -0.04em;
   color: var(--accent); margin-bottom: 0.75rem; line-height: 1.1;
 }
-#hero .tagline { color: var(--muted); font-size: 1.1rem; max-width: 580px; margin: 0 auto 2.5rem; }
-.hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+#hero .tagline { color: var(--muted); font-size: 1.1rem; margin: 0 0 2.5rem; }
+.hero-actions { display: flex; gap: 1rem; flex-wrap: wrap; }
+.hero-right {
+  flex: 0 0 42%; background: #1a1714;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+#hero-canvas {
+  width: 100%; height: 100%; display: block;
+  image-rendering: pixelated; image-rendering: crisp-edges;
+}
+@media (max-width: 640px) {
+  #hero { flex-direction: column; }
+  .hero-left { padding: 3rem 2rem 2rem; }
+  .hero-right { min-height: 220px; flex: 0 0 auto; }
+}
 .btn {
   display: inline-block; padding: 0.65rem 1.5rem; border-radius: 7px;
   font-size: 0.9rem; font-weight: 600; text-decoration: none; transition: background 0.15s;
@@ -159,13 +176,18 @@ footer a:hover { color: var(--text); }
 
 <!-- ── Hero ──────────────────────────────────────────────── -->
 <div id="hero">
-  <h1>Evolutionary<br>Art Generator</h1>
-  <p class="tagline">
-    Breed mathematical expression trees into 4K images. Pick the ones you like — the system does the rest.
-  </p>
-  <div class="hero-actions">
-    <a href="genome-explainer.html" class="btn btn-primary">Interactive Explainer</a>
-    <a href="https://github.com/kleer001/galapagos3" class="btn btn-outline">View on GitHub</a>
+  <div class="hero-left">
+    <h1>Evolutionary<br>Art Generator</h1>
+    <p class="tagline">
+      Breed mathematical expression trees into 4K images. Pick the ones you like — the system does the rest.
+    </p>
+    <div class="hero-actions">
+      <a href="genome-explainer.html" class="btn btn-primary">Interactive Explainer</a>
+      <a href="https://github.com/kleer001/galapagos3" class="btn btn-outline">View on GitHub</a>
+    </div>
+  </div>
+  <div class="hero-right">
+    <canvas id="hero-canvas" width="240" height="180"></canvas>
   </div>
 </div>
 
@@ -302,6 +324,108 @@ cd galapagos3 &amp;&amp; cargo run --release</pre>
 </footer>
 
 <script>
+// ── Evolving hero canvas ──────────────────────────────────────────────────────
+// Minimal port of the genome-explainer renderer. No external deps.
+
+(function () {
+  const OPS = [
+    {id:'x',arity:0},{id:'y',arity:0},{id:'const',arity:0},
+    {id:'sin',arity:1},{id:'cos',arity:1},{id:'abs',arity:1},
+    {id:'sqrt',arity:1},{id:'fract',arity:1},{id:'negate',arity:1},
+    {id:'add',arity:2},{id:'sub',arity:2},{id:'mul',arity:2},
+    {id:'div',arity:2},{id:'mod',arity:2},{id:'min',arity:2},
+    {id:'max',arity:2},{id:'pow',arity:2},
+    {id:'mix',arity:3},{id:'smoothstep',arity:3},
+  ];
+  const TERM = OPS.filter(o => o.arity === 0);
+  const NON  = OPS.filter(o => o.arity > 0);
+  function pick(a) { return a[Math.random() * a.length | 0]; }
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+
+  function mkTree(depth) {
+    if (depth <= 0 || Math.random() < 0.12) {
+      const t = Math.random();
+      if (t < 0.38) return {op:'const', v:rnd(-2,2), ch:[]};
+      return {op: Math.random() < 0.5 ? 'x' : 'y', ch:[]};
+    }
+    const op = pick(NON);
+    const ch = Array.from({length: op.arity}, () => mkTree(depth - 1));
+    return {op: op.id, ch};
+  }
+
+  function ev(n, x, y) {
+    const [a, b, t] = n.ch.map(c => ev(c, x, y));
+    switch (n.op) {
+      case 'x': return x; case 'y': return y; case 'const': return n.v;
+      case 'sin': return Math.sin(Math.PI * a);
+      case 'cos': return Math.cos(Math.PI * a);
+      case 'abs': return Math.abs(a);
+      case 'sqrt': return Math.sqrt(Math.abs(a));
+      case 'fract': return a - Math.floor(a);
+      case 'negate': return -a;
+      case 'add': return a + b; case 'sub': return a - b;
+      case 'mul': return a * b;
+      case 'div': return Math.abs(b) < 1e-6 ? 0 : a / b;
+      case 'mod': return Math.abs(b) < 1e-6 ? 0 : a - b * Math.floor(a / b);
+      case 'min': return Math.min(a, b); case 'max': return Math.max(a, b);
+      case 'pow': return Math.pow(Math.abs(a), Math.min(Math.abs(b), 8));
+      case 'mix': return a * (1 - (t||0)) + b * (t||0);
+      case 'smoothstep': {
+        const tt = Math.max(0, Math.min(1, ((t||0) - a) / ((b - a) || 1e-6)));
+        return tt * tt * (3 - 2 * tt);
+      }
+      default: return 0;
+    }
+  }
+
+  function norm(v) { return (Math.sin(v) + 1) * 0.5; }
+
+  function hsv2rgb(h, s, v) {
+    h = ((h % 1) + 1) % 1; s = Math.max(0, Math.min(1, s)); v = Math.max(0, Math.min(1, v));
+    const i = Math.floor(h * 6), f = h * 6 - i;
+    const p = v*(1-s), q = v*(1-f*s), t2 = v*(1-(1-f)*s);
+    switch (i % 6) {
+      case 0: return [v,t2,p]; case 1: return [q,v,p]; case 2: return [p,v,t2];
+      case 3: return [p,q,v];  case 4: return [t2,p,v]; default: return [v,p,q];
+    }
+  }
+
+  function render(canvas, h, s, v) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const img = ctx.createImageData(W, H);
+    for (let py = 0; py < H; py++) {
+      const y = (py / H) * 2 - 1;
+      for (let px = 0; px < W; px++) {
+        const x = (px / W) * 2 - 1;
+        const [r, g, b] = hsv2rgb(norm(ev(h,x,y)), norm(ev(s,x,y)), norm(ev(v,x,y)));
+        const i = (py * W + px) * 4;
+        img.data[i] = r*255|0; img.data[i+1] = g*255|0;
+        img.data[i+2] = b*255|0; img.data[i+3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  const canvas = document.getElementById('hero-canvas');
+
+  function evolve() {
+    // Fade out, render new genome, fade in
+    canvas.style.transition = 'opacity 0.4s ease';
+    canvas.style.opacity = '0';
+    setTimeout(() => {
+      render(canvas, mkTree(4), mkTree(4), mkTree(4));
+      canvas.style.opacity = '1';
+    }, 420);
+  }
+
+  // First render immediately (no fade)
+  render(canvas, mkTree(4), mkTree(4), mkTree(4));
+  // Then evolve every 3 seconds
+  setInterval(evolve, 3000);
+})();
+
+// ── OS tab switcher ───────────────────────────────────────────────────────────
 function switchOS(os) {
   document.querySelectorAll('.os-tab').forEach((t, i) =>
     t.classList.toggle('active', (os === 'unix') ? i === 0 : i === 1));

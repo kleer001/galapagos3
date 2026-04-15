@@ -757,7 +757,7 @@ function selectChip(chip, op) {
 
 let currentTree = null;
 let animTimer   = null;
-const ANIM_MS   = 250;
+const ANIM_MS   = 60;
 
 document.getElementById('depth-slider').oninput = function() {
   document.getElementById('depth-val').textContent = this.value;
@@ -1137,8 +1137,8 @@ buildChips();
 rerollEvo();
 updateHSV();
 
-// Auto-roll a starter tree so the page isn't empty on load
-setTimeout(rollTree, 400);
+// Auto-roll immediately so the tree is already growing when the page appears
+rollTree();
 </script>
 </body>
 </html>
