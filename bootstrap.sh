@@ -16,6 +16,16 @@ fi
 export PATH="$HOME/.cargo/bin:$PATH"
 echo "Rust: $(rustc --version)"
 
+# ── macOS: Xcode Command Line Tools (provides the linker Rust needs) ─────────
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    if ! command -v clang &>/dev/null; then
+        echo "Installing Xcode Command Line Tools (required for Rust linker)..."
+        xcode-select --install
+        echo "Re-run this script once the Xcode CLT installer finishes."
+        exit 0
+    fi
+fi
+
 # ── System deps (Linux) ───────────────────────────────────────────────────────
 if [[ "$(uname -s)" == "Linux" ]]; then
     echo "Installing system deps..."
