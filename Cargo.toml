@@ -2,7 +2,7 @@
 name = "galapagos3"
 version = "0.1.0"
 edition = "2021"
-description = "GPU-accelerated evolutionary art generator — breeds mathematical expression trees into 4K images through human selection"
+description = "GPU-accelerated evolutionary art generator — breeds mathematical expression trees into 2K images through human selection"
 authors = ["kleer001"]
 repository = "https://github.com/kleer001/galapagos3"
 license = "MIT"
