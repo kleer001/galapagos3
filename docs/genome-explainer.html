@@ -428,7 +428,7 @@ footer a { color: var(--accent); }
         <label>Tree depth: <span id="mut-depth-val">2</span></label>
         <input type="range" id="mut-depth" min="1" max="5" value="2"
                oninput="document.getElementById('mut-depth-val').textContent=this.value">
-        <div class="mut-desc">How deep the new subtree grows. 1 = one node, 5 = a full branch.</div>
+        <div class="mut-desc">Crossover: how deep the swap point can be. Mutate: how deep the replacement grows. 1 = near the root, 5 = near the leaves.</div>
       </div>
     </div>
   </div>
@@ -889,6 +889,17 @@ function nudgeConstantsInPlace(root) {
   root.children.forEach(nudgeConstantsInPlace);
 }
 
+// Collect non-root nodes up to maxDepth levels deep
+function flatNodesAtMaxDepth(root, maxDepth) {
+  const list = [];
+  function walk(n, d, isRoot) {
+    if (!isRoot) list.push(n);
+    if (d < maxDepth) n.children.forEach(c => walk(c, d + 1, false));
+  }
+  walk(root, 0, true);
+  return list;
+}
+
 function doCrossover() {
   if (!evoA || !evoB) return;
   const btnCross = document.getElementById('btn-crossover');
@@ -899,39 +910,28 @@ function doCrossover() {
   const svgB = document.getElementById('evo-svg-b');
   const svgC = document.getElementById('evo-svg-child');
 
-  // Pick random nodes (prefer non-leaf for interesting swaps)
-  const nodesA = flatNodes(evoA, true);
-  const nodesB = flatNodes(evoB, true);
-  const nodeA  = nodesA.length ? pick(nodesA) : evoA;
-  const nodeB  = nodesB.length ? pick(nodesB) : evoB;
+  // Depth slider constrains how deep into each tree the swap point can be
+  const depth = parseInt(document.getElementById('mut-depth').value);
+  const poolA = flatNodesAtMaxDepth(evoA, depth);
+  const poolB = flatNodesAtMaxDepth(evoB, depth);
+  const nodeA = (poolA.length ? poolA : flatNodes(evoA, true)).reduce((_, __, ___, a) => pick(a));
+  const nodeB = (poolB.length ? poolB : flatNodes(evoB, true)).reduce((_, __, ___, a) => pick(a));
 
   const hiA = subtreeIds(nodeA);
   const hiB = subtreeIds(nodeB);
 
-  // Highlight both parents simultaneously (blue=A, red=B)
+  // Highlight the selected swap subtrees in each parent
   renderSVG(svgA, evoA, null, hiA, () => EVO_A_COLOR);
   renderSVG(svgB, evoB, null, hiB, () => EVO_B_COLOR);
 
   setTimeout(() => {
-    // Step 1: crossover — aIds = A-origin nodes, bIds = B-origin nodes (by preserved IDs)
-    const { tree: crossed, aIds, bIds } = replaceByIdAndTrack(evoA, nodeA.id, nodeB);
+    // Pure crossover: swap nodeA's position in evoA with nodeB's subtree
+    const { tree: child, bIds } = replaceByIdAndTrack(evoA, nodeA.id, nodeB);
 
-    // Step 2: mutation — nudge in-place (IDs preserved) or replace (new nodes get new IDs)
-    let child = crossed;
-    if (mutMode === 'finetune') {
-      nudgeConstantsInPlace(crossed);  // modifies in-place; aIds/bIds still valid
-    } else {
-      const depth = parseInt(document.getElementById('mut-depth').value);
-      const mNodes = flatNodes(crossed);
-      if (mNodes.length) {
-        const mTarget = pick(mNodes);
-        child = replaceById(crossed, mTarget.id, randomTree(depth));
-        // Unchanged nodes reuse original refs → aIds/bIds still valid for them
-        // Newly inserted nodes have IDs in neither set → rendered with op-group color
-      }
-    }
+    // Fine-tune mode: nudge constants in-place — IDs are preserved so colors stay valid
+    if (mutMode === 'finetune') nudgeConstantsInPlace(child);
 
-    // Blue = from Parent A (or mutation) · Red = from Parent B
+    // Blue = from Parent A · Red = from Parent B
     const childColorFn = n => bIds.has(n.id) ? EVO_B_COLOR : EVO_A_COLOR;
     renderSVG(svgC, child, null, allIds(child), childColorFn);
     renderGray(document.getElementById('evo-canvas-child'), child);
