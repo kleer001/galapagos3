@@ -41,9 +41,29 @@ h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.4rem; color: var(--ac
 .section-sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; max-width: 640px; }
 
 /* ── Hero ────────────────────────────────────────────────── */
-#hero { border-bottom: 1px solid var(--border); text-align: center; padding: 4rem 2rem 3.5rem; max-width: 100%; }
+#hero {
+  border-bottom: 1px solid var(--border);
+  max-width: 100%; display: flex; align-items: stretch; min-height: 300px;
+}
+.hero-left {
+  flex: 1; padding: 3.5rem 3rem 3.5rem 4rem;
+  display: flex; flex-direction: column; justify-content: center;
+}
 #hero h1 { font-size: 2.25rem; font-weight: 800; letter-spacing: -0.04em; color: var(--accent); margin-bottom: 0.75rem; }
-#hero p  { color: var(--muted); font-size: 1.05rem; max-width: 600px; margin: 0 auto; }
+#hero p  { color: var(--muted); font-size: 1.05rem; max-width: 480px; }
+.hero-right {
+  flex: 0 0 38%; background: #1a1714;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+#hero-canvas {
+  width: 100%; height: 100%; display: block;
+  image-rendering: pixelated; image-rendering: crisp-edges;
+}
+@media (max-width: 640px) {
+  #hero { flex-direction: column; }
+  .hero-left { padding: 2.5rem 2rem 2rem; }
+  .hero-right { min-height: 200px; flex: 0 0 auto; }
+}
 
 /* ── Buttons ─────────────────────────────────────────────── */
 button {
@@ -222,8 +242,13 @@ footer a { color: var(--accent); }
 
 <!-- ── Hero ─────────────────────────────────────────────── -->
 <div id="hero">
-  <h1>From Genome to Image</h1>
-  <p>Every image starts as a random math formula. You pick the ones worth keeping, and Galápagos breeds the next generation. Here's how that works.</p>
+  <div class="hero-left">
+    <h1>From Genome to Image</h1>
+    <p>Every image starts as a random math formula. You pick the ones worth keeping, and Galápagos breeds the next generation. Here's how that works.</p>
+  </div>
+  <div class="hero-right">
+    <canvas id="hero-canvas" width="240" height="180"></canvas>
+  </div>
 </div>
 
 <!-- ── Section 1: Building Blocks ──────────────────────── -->
@@ -1139,6 +1164,21 @@ updateHSV();
 
 // Auto-roll immediately so the tree is already growing when the page appears
 rollTree();
+
+// ── Evolving hero canvas — reuses renderHSV / randomTree defined above ────────
+(function () {
+  const canvas = document.getElementById('hero-canvas');
+  function evolve() {
+    canvas.style.transition = 'opacity 0.4s ease';
+    canvas.style.opacity = '0';
+    setTimeout(() => {
+      renderHSV(canvas, randomTree(4), randomTree(4), randomTree(4));
+      canvas.style.opacity = '1';
+    }, 420);
+  }
+  renderHSV(canvas, randomTree(4), randomTree(4), randomTree(4));
+  setInterval(evolve, 3000);
+})();
 </script>
 </body>
 </html>
