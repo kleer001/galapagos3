@@ -6,11 +6,17 @@ GPU-accelerated evolutionary art generator. Breeds random mathematical expressio
 
 ## Install
 
+**Linux / macOS:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.sh | bash
 ```
 
-Installs Rust if needed, pulls system deps (Linux), clones, and builds. Re-run from inside the repo to update — idempotent.
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.ps1 | iex"
+```
+
+Both scripts install Rust if needed, clone the repo, and build. No admin rights required. Re-run to update — idempotent.
 
 ## What it does
 

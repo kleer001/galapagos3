@@ -116,6 +116,18 @@ details .manual-steps p { margin-bottom: 0.4rem; color: var(--muted); }
 .demo-preview-inner { font-size: 3rem; margin-bottom: 0.75rem; }
 .demo-preview-label { color: var(--accent); font-weight: 600; font-size: 1rem; }
 
+/* ── OS tabs ── */
+.os-tabs { display: flex; gap: 0; margin-bottom: 0; border-bottom: none; }
+.os-tab {
+  padding: 0.45rem 1.1rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+  border: 1.5px solid var(--border); border-bottom: none; border-radius: 6px 6px 0 0;
+  background: var(--btn); color: var(--muted); transition: all 0.12s; margin-right: 3px;
+  user-select: none;
+}
+.os-tab.active { background: var(--panel); color: var(--accent); border-color: var(--border); }
+.os-panel { display: none; }
+.os-panel.active { display: block; }
+
 /* ── Controls ── */
 .controls-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 .controls-table th {
@@ -160,35 +172,64 @@ footer a:hover { color: var(--text); }
 <!-- ── Install ───────────────────────────────────────────── -->
 <section id="install">
   <h2>Get Started</h2>
-  <p class="sub">One command on Linux or macOS. Installs Rust if needed, pulls system deps, clones, and builds.</p>
+  <p class="sub">One command. No admin rights required. Installs Rust if needed, clones, and builds.</p>
 
-  <div class="install-box">
-    <div class="install-label">Linux / macOS — Terminal</div>
-    <div class="install-cmd">
-      <span id="cmd-text">curl -sSL https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.sh | bash</span>
-      <button class="copy-btn" onclick="copyCmd()">Copy</button>
-    </div>
+  <div class="os-tabs">
+    <div class="os-tab active" onclick="switchOS('unix')">Linux / macOS</div>
+    <div class="os-tab" onclick="switchOS('win')">Windows</div>
   </div>
 
-  <p class="install-note">
-    After the build finishes, run: <code>cd ~/galapagos3 &amp;&amp; cargo run --release</code><br>
-    On Linux if the window doesn't appear: <code>WINIT_UNIX_BACKEND=x11 cargo run --release</code>
-  </p>
-
-  <details>
-    <summary>Manual setup (step by step)</summary>
-    <div class="manual-steps">
-      <p><strong>1. Install Rust</strong></p>
-      <pre>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</pre>
-      <p><strong>2. Install system deps (Ubuntu / Debian)</strong></p>
-      <pre>sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers \
-    libwayland-dev libxkbcommon-dev libudev-dev pkg-config build-essential</pre>
-      <p><strong>3. Clone and build</strong></p>
-      <pre>git clone https://github.com/kleer001/galapagos3.git
-cd galapagos3
-cargo run --release</pre>
+  <div id="panel-unix" class="os-panel active">
+    <div class="install-box" style="border-radius:0 8px 8px 8px">
+      <div class="install-label">Terminal</div>
+      <div class="install-cmd">
+        <span class="cmd-text">curl -sSL https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.sh | bash</span>
+        <button class="copy-btn" onclick="copyCmd(this)">Copy</button>
+      </div>
     </div>
-  </details>
+    <p class="install-note" style="margin-top:0.75rem">
+      After the build: <code>cd ~/galapagos3 &amp;&amp; cargo run --release</code><br>
+      Linux window not appearing? Try: <code>WINIT_UNIX_BACKEND=x11 cargo run --release</code>
+    </p>
+    <details>
+      <summary>Manual setup</summary>
+      <div class="manual-steps">
+        <p><strong>1. Install Rust</strong></p>
+        <pre>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</pre>
+        <p><strong>2. System deps (Ubuntu / Debian)</strong></p>
+        <pre>sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers \
+    libwayland-dev libxkbcommon-dev libudev-dev pkg-config build-essential</pre>
+        <p><strong>3. Clone and build</strong></p>
+        <pre>git clone https://github.com/kleer001/galapagos3.git
+cd galapagos3 &amp;&amp; cargo run --release</pre>
+      </div>
+    </details>
+  </div>
+
+  <div id="panel-win" class="os-panel">
+    <div class="install-box" style="border-radius:0 8px 8px 8px">
+      <div class="install-label">PowerShell</div>
+      <div class="install-cmd">
+        <span class="cmd-text">powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.ps1 | iex"</span>
+        <button class="copy-btn" onclick="copyCmd(this)">Copy</button>
+      </div>
+    </div>
+    <p class="install-note" style="margin-top:0.75rem">
+      After the build: <code>cd %USERPROFILE%\galapagos3 &amp;&amp; cargo run --release</code><br>
+      Uses the GNU toolchain — no Visual Studio required. See script output if you hit a linker error.
+    </p>
+    <details>
+      <summary>Manual setup</summary>
+      <div class="manual-steps">
+        <p><strong>1. Install git</strong> (no admin) — <a href="https://git-scm.com/download/win" style="color:var(--blue)">git-scm.com</a>, choose "for current user only"</p>
+        <p><strong>2. Install Rust</strong> (no admin) — <a href="https://rustup.rs" style="color:var(--blue)">rustup.rs</a></p>
+        <pre>rustup default stable-x86_64-pc-windows-gnu</pre>
+        <p><strong>3. Clone and build</strong></p>
+        <pre>git clone https://github.com/kleer001/galapagos3.git
+cd galapagos3 &amp;&amp; cargo run --release</pre>
+      </div>
+    </details>
+  </div>
 </section>
 
 <!-- ── Features ──────────────────────────────────────────── -->
@@ -261,10 +302,16 @@ cargo run --release</pre>
 </footer>
 
 <script>
-function copyCmd() {
-  const text = document.getElementById('cmd-text').textContent.trim();
+function switchOS(os) {
+  document.querySelectorAll('.os-tab').forEach((t, i) =>
+    t.classList.toggle('active', (os === 'unix') ? i === 0 : i === 1));
+  document.getElementById('panel-unix').classList.toggle('active', os === 'unix');
+  document.getElementById('panel-win').classList.toggle('active', os === 'win');
+}
+
+function copyCmd(btn) {
+  const text = btn.closest('.install-box').querySelector('.cmd-text').textContent.trim();
   navigator.clipboard.writeText(text).then(() => {
-    const btn = document.querySelector('.copy-btn');
     btn.textContent = 'Copied!';
     setTimeout(() => btn.textContent = 'Copy', 1800);
   });
