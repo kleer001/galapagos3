@@ -2,7 +2,15 @@
 
 GPU-accelerated evolutionary art generator. Breeds random mathematical expression trees into 4K images through human selection — inspired by Karl Sims' 1991 work.
 
-![4×4 grid of evolved images](docs/genome-explainer.html)
+**[Project page + interactive explainer →](https://kleer001.github.io/galapagos3/)**
+
+## Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.sh | bash
+```
+
+Installs Rust if needed, pulls system deps (Linux), clones, and builds. Re-run from inside the repo to update — idempotent.
 
 ## What it does
 
@@ -33,7 +41,7 @@ WINIT_UNIX_BACKEND=x11 cargo run
 
 ## How it works
 
-See **[docs/genome-explainer.html](docs/genome-explainer.html)** — an interactive guide that walks through building blocks, tree growth, pixel evaluation, HSV coloring, channel remapping, and evolution with live animations.
+See **[kleer001.github.io/galapagos3/genome-explainer.html](https://kleer001.github.io/galapagos3/genome-explainer.html)** — an interactive guide that walks through building blocks, tree growth, pixel evaluation, HSV coloring, channel remapping, and evolution with live animations.
 
 ## Architecture
 

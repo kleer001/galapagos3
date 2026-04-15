@@ -67,6 +67,12 @@ fn eval_div(a: f32, b: f32) -> f32 { if b.abs() >= 1e-6 { a / b } else { 0.0 } }
 fn eval_pow(a: f32, b: f32) -> f32 { if a > 0.0 { a.powf(b) } else { 0.0 } }
 fn eval_step(edge: f32, x: f32) -> f32 { if x >= edge { 1.0 } else { 0.0 } }
 
+fn eval_clamp(v: f32, lo: f32, hi: f32) -> f32 {
+    let lo = if lo.is_nan() { 0.0 } else { lo };
+    let hi = if hi.is_nan() { 1.0 } else { hi };
+    v.clamp(lo.min(hi), lo.max(hi))
+}
+
 fn eval_mix(lo: f32, hi: f32, t: f32) -> f32 { lo + (hi - lo) * t }
 fn eval_smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
@@ -178,7 +184,7 @@ pub static OP_REGISTRY: [OpDef; 47] = [
     OpDef { opcode: OpCode::Tanh,       name: "Tanh",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::tanh) },
     OpDef { opcode: OpCode::Min,        name: "Min",        arity: Arity::Binary,   eval: EvalFn::Binary(f32::min) },
     OpDef { opcode: OpCode::Max,        name: "Max",        arity: Arity::Binary,   eval: EvalFn::Binary(f32::max) },
-    OpDef { opcode: OpCode::Clamp,      name: "Clamp",      arity: Arity::Ternary,  eval: EvalFn::Ternary(f32::clamp) },
+    OpDef { opcode: OpCode::Clamp,      name: "Clamp",      arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_clamp) },
     OpDef { opcode: OpCode::Sign,       name: "Sign",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_sign) },
     OpDef { opcode: OpCode::Floor,      name: "Floor",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::floor) },
     OpDef { opcode: OpCode::Ceil,       name: "Ceil",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::ceil) },

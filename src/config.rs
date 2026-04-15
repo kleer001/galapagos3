@@ -74,6 +74,10 @@ pub const BINARY_CHILD_SIDE_PROB: f64 = 0.5;
 /// 2 out of 16 = 12.5% diversity injection.
 pub const FRESH_RANDOM_COUNT: usize = 2;
 
+/// Minimum output range a palette remap genome must span across t=[0,1].
+/// Genomes below this threshold are regenerated or re-mutated (up to 10 attempts).
+pub const PALETTE_MIN_RANGE: f32 = 0.05;
+
 // ============================================================================
 // UI LAYOUT
 // ============================================================================
@@ -82,6 +86,18 @@ pub const FRESH_RANDOM_COUNT: usize = 2;
 // GPU RENDERING
 // ============================================================================
 
-/// GPU supersampling factor for anti-aliasing.
-/// At 1080p native resolution, SSAA=1 gives the same GPU pixel budget as the old 512×256×4.
+/// GPU supersampling factor for anti-aliasing (display and save).
 pub const SUPERSAMPLE_FACTOR: u32 = 2;
+
+/// Supersampling factor used when saving images.
+/// At TILE_W=1920, TILE_H=1080, RGBA float (16 bytes/pixel):
+///   factor 2 → 3840×2160 render buffer = 133 MB  ✓
+///   factor 3 → 5760×3240 render buffer = 298 MB  ✗ (GPU max is 256 MB)
+/// Increase only if TILE_W/TILE_H are reduced first.
+pub const SAVE_SUPERSAMPLE_FACTOR: u32 = 2;
+
+/// Number of jittered passes accumulated for save-quality renders.
+/// Each pass uses Halton-sequence sub-pixel offsets (base-2 × base-3).
+/// Total effective samples per output pixel = SAVE_AA_SAMPLES × SAVE_SUPERSAMPLE_FACTOR².
+/// 8 passes × 4 SSAA samples = 32 samples/pixel. Expect ~4 s per save.
+pub const SAVE_AA_SAMPLES: u32 = 8;

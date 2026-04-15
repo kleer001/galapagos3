@@ -86,6 +86,9 @@ pub struct OutputInfo {
     pub height: u32,
     pub tile_w: u32,
     pub tile_h: u32,
+    pub jitter_x: f32,
+    pub jitter_y: f32,
+    pub _pad: [f32; 2],
 }
 
 // ============================================================================
@@ -93,11 +96,13 @@ pub struct OutputInfo {
 // ============================================================================
 
 pub struct GpuRenderer {
+    #[allow(dead_code)]
     instance: wgpu::Instance,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
+    #[allow(dead_code)]
     shader_module: wgpu::ShaderModule,
 }
 
@@ -268,10 +273,37 @@ impl GpuRenderer {
         let sr_instr = Self::instructions_to_gpu(&s_remap.instructions);
         let vr_instr = Self::instructions_to_gpu(&v_remap.instructions);
 
-        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h).await
+        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h, 0.0, 0.0).await
     }
 
-    /// Render a single tile from raw instruction tuples (for external use)
+    /// Render a single tile at a specified output size with optional SSAA.
+    /// `ssaa_factor`: 1 = no AA (preview), 2 = display hires, 4 = save quality.
+    pub async fn render_tile_at_size(
+        &self,
+        h_raw: &[(u32, i32, i32, i32, f32)],
+        s_raw: &[(u32, i32, i32, i32, f32)],
+        v_raw: &[(u32, i32, i32, i32, f32)],
+        hr_raw: &[(u32, i32, i32, i32, f32)],
+        sr_raw: &[(u32, i32, i32, i32, f32)],
+        vr_raw: &[(u32, i32, i32, i32, f32)],
+        output_w: u32,
+        output_h: u32,
+        ssaa_factor: u32,
+    ) -> RenderResult<Vec<u32>> {
+        let (render_w, render_h) = (output_w * ssaa_factor, output_h * ssaa_factor);
+        let h_instr = instructions_to_gpu_raw(h_raw);
+        let s_instr = instructions_to_gpu_raw(s_raw);
+        let v_instr = instructions_to_gpu_raw(v_raw);
+        let hr_instr = instructions_to_gpu_raw(hr_raw);
+        let sr_instr = instructions_to_gpu_raw(sr_raw);
+        let vr_instr = instructions_to_gpu_raw(vr_raw);
+        self.render_from_gpu_instructions(
+            h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
+            render_w, render_h, output_w, output_h, 0.0, 0.0,
+        ).await
+    }
+
+    /// Render a single tile at full output resolution with SSAA (for external use).
     pub async fn render_tile_from_raw(
         &self,
         h_raw: &[(u32, i32, i32, i32, f32)],
@@ -281,22 +313,11 @@ impl GpuRenderer {
         sr_raw: &[(u32, i32, i32, i32, f32)],
         vr_raw: &[(u32, i32, i32, i32, f32)],
     ) -> RenderResult<Vec<u32>> {
-        let output_w = config::TILE_W;
-        let output_h = config::TILE_H;
-        let render_w = output_w * config::SUPERSAMPLE_FACTOR;
-        let render_h = output_h * config::SUPERSAMPLE_FACTOR;
-
-        let h_instr = instructions_to_gpu_raw(h_raw);
-        let s_instr = instructions_to_gpu_raw(s_raw);
-        let v_instr = instructions_to_gpu_raw(v_raw);
-        let hr_instr = instructions_to_gpu_raw(hr_raw);
-        let sr_instr = instructions_to_gpu_raw(sr_raw);
-        let vr_instr = instructions_to_gpu_raw(vr_raw);
-
-        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h).await
+        self.render_tile_at_size(h_raw, s_raw, v_raw, hr_raw, sr_raw, vr_raw, config::TILE_W, config::TILE_H, config::SUPERSAMPLE_FACTOR).await
     }
 
-    /// Internal: render from already-converted GPU instructions with supersampling
+    /// Internal: render from already-converted GPU instructions with supersampling.
+    /// `jitter_x/y` are sub-pixel offsets in render-pixel units; pass 0.0 for no jitter.
     async fn render_from_gpu_instructions(
         &self,
         h_instr: [GpuInstruction; config::MAX_INSTRUCTIONS],
@@ -309,6 +330,8 @@ impl GpuRenderer {
         render_h: u32,
         output_w: u32,
         output_h: u32,
+        jitter_x: f32,
+        jitter_y: f32,
     ) -> RenderResult<Vec<u32>> {
         let render_size = (render_w * render_h) as usize;
         let output_size = (output_w * output_h) as usize;
@@ -331,8 +354,11 @@ impl GpuRenderer {
             usage: wgpu::BufferUsages::STORAGE,
         });
 
-        // Create output info buffer (render resolution for shader)
-        let output_info = OutputInfo { width: render_w, height: render_h, tile_w: render_w, tile_h: render_h };
+        // Create output info buffer (render resolution + jitter for shader)
+        let output_info = OutputInfo {
+            width: render_w, height: render_h, tile_w: render_w, tile_h: render_h,
+            jitter_x, jitter_y, _pad: [0.0; 2],
+        };
         let info_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output Info Buffer"),
             contents: bytemuck::cast_slice(&[output_info]),
@@ -401,37 +427,141 @@ impl GpuRenderer {
         let guard = buffer_slice.get_mapped_range();
         let data: &[f32] = bytemuck::cast_slice(&guard);
 
-        // Downsample from render resolution to output resolution (box filter)
-        let ss_factor = config::SUPERSAMPLE_FACTOR as usize;
+        // Downsample from render resolution to output resolution.
+        let ss_factor = (render_w / output_w) as usize;
         let mut pixels = Vec::with_capacity(output_size);
 
-        for out_y in 0..output_h as usize {
-            for out_x in 0..output_w as usize {
-                let mut r_sum = 0.0;
-                let mut g_sum = 0.0;
-                let mut b_sum = 0.0;
-
-                // Average over supersample region
-                for sy in 0..ss_factor {
-                    for sx in 0..ss_factor {
-                        let rx = out_x * ss_factor + sx;
-                        let ry = out_y * ss_factor + sy;
-                        let idx = (ry * render_w as usize + rx) * 4;
-                        r_sum += data[idx];
-                        g_sum += data[idx + 1];
-                        b_sum += data[idx + 2];
-                    }
-                }
-
-                let count = (ss_factor * ss_factor) as f32;
-                let r = ((r_sum / count) * 255.0) as u32;
-                let g = ((g_sum / count) * 255.0) as u32;
-                let b = ((b_sum / count) * 255.0) as u32;
+        if ss_factor <= 1 {
+            // No SSAA: direct copy.
+            for i in 0..output_size {
+                let idx = i * 4;
+                let r = (data[idx] * 255.0) as u32;
+                let g = (data[idx + 1] * 255.0) as u32;
+                let b = (data[idx + 2] * 255.0) as u32;
                 pixels.push((r << 16) | (g << 8) | b);
+            }
+        } else {
+            // Gaussian reconstruction filter — σ = 0.5 output pixels in render space.
+            // Extends ±radius render pixels beyond the SSAA block to smooth reconstruction
+            // across output pixel boundaries, which visibly reduces raster-step aliasing.
+            // The 1D kernel is precomputed once (separable 2D = wx*wy product).
+            let sigma = ss_factor as f32 * 0.5; // 1.0 render px for ss=2
+            let radius = (sigma * 3.0).ceil() as i32; // 3 for ss=2 → 7-tap
+            let inv_2sigma2 = 0.5 / (sigma * sigma);
+            // Distance from each kernel tap to the output-pixel center (constant for all pixels).
+            // cx = out_x*ss + (ss-1)/2  →  rx_base = out_x*ss  →  dx[k] = k - radius - (ss-1)/2
+            let half_ss = (ss_factor as f32 - 1.0) * 0.5;
+            let ksize = (radius * 2 + 1) as usize;
+            let mut kernel_1d = vec![0.0f32; ksize];
+            for k in 0..ksize as i32 {
+                let d = k as f32 - radius as f32 - half_ss;
+                kernel_1d[k as usize] = (-(d * d) * inv_2sigma2).exp();
+            }
+
+            for out_y in 0..output_h as usize {
+                let ry_base = (out_y * ss_factor) as i32;
+                for out_x in 0..output_w as usize {
+                    let rx_base = (out_x * ss_factor) as i32;
+                    let mut r_sum = 0.0f32;
+                    let mut g_sum = 0.0f32;
+                    let mut b_sum = 0.0f32;
+                    let mut w_sum = 0.0f32;
+                    for ky in 0..ksize as i32 {
+                        let ry = ry_base + ky - radius;
+                        if ry < 0 || ry >= render_h as i32 { continue; }
+                        let wy = kernel_1d[ky as usize];
+                        for kx in 0..ksize as i32 {
+                            let rx = rx_base + kx - radius;
+                            if rx < 0 || rx >= render_w as i32 { continue; }
+                            let w = wy * kernel_1d[kx as usize];
+                            let idx = (ry as usize * render_w as usize + rx as usize) * 4;
+                            r_sum += data[idx] * w;
+                            g_sum += data[idx + 1] * w;
+                            b_sum += data[idx + 2] * w;
+                            w_sum += w;
+                        }
+                    }
+                    let r = ((r_sum / w_sum) * 255.0).clamp(0.0, 255.0) as u32;
+                    let g = ((g_sum / w_sum) * 255.0).clamp(0.0, 255.0) as u32;
+                    let b = ((b_sum / w_sum) * 255.0).clamp(0.0, 255.0) as u32;
+                    pixels.push((r << 16) | (g << 8) | b);
+                }
             }
         }
 
         Ok(pixels)
     }
+
+    /// Multi-pass jittered SSAA for save-quality renders.
+    /// Renders `num_samples` times with Halton-sequence sub-pixel offsets (base-2 × base-3),
+    /// then accumulates and averages. Each pass uses `ssaa_factor` for regular SSAA on top.
+    /// Total effective samples per output pixel = num_samples × ssaa_factor².
+    pub async fn render_tile_save_quality(
+        &self,
+        h_raw: &[(u32, i32, i32, i32, f32)],
+        s_raw: &[(u32, i32, i32, i32, f32)],
+        v_raw: &[(u32, i32, i32, i32, f32)],
+        hr_raw: &[(u32, i32, i32, i32, f32)],
+        sr_raw: &[(u32, i32, i32, i32, f32)],
+        vr_raw: &[(u32, i32, i32, i32, f32)],
+        output_w: u32,
+        output_h: u32,
+        ssaa_factor: u32,
+        num_samples: u32,
+    ) -> RenderResult<Vec<u32>> {
+        let render_w = output_w * ssaa_factor;
+        let render_h = output_h * ssaa_factor;
+
+        // Convert instructions once; arrays are Copy so they can be passed multiple times.
+        let h_instr  = instructions_to_gpu_raw(h_raw);
+        let s_instr  = instructions_to_gpu_raw(s_raw);
+        let v_instr  = instructions_to_gpu_raw(v_raw);
+        let hr_instr = instructions_to_gpu_raw(hr_raw);
+        let sr_instr = instructions_to_gpu_raw(sr_raw);
+        let vr_instr = instructions_to_gpu_raw(vr_raw);
+
+        let pixel_count = (output_w * output_h) as usize;
+        let mut acc_r = vec![0.0f32; pixel_count];
+        let mut acc_g = vec![0.0f32; pixel_count];
+        let mut acc_b = vec![0.0f32; pixel_count];
+
+        for s in 0..num_samples {
+            // Halton sequence: index is 1-based, bases 2 and 3 are coprime → good 2D coverage.
+            // Offset to [-0.5, 0.5] so samples are distributed around the pixel center.
+            let jx = halton(s + 1, 2) - 0.5;
+            let jy = halton(s + 1, 3) - 0.5;
+
+            let pixels = self.render_from_gpu_instructions(
+                h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
+                render_w, render_h, output_w, output_h, jx, jy,
+            ).await?;
+
+            for (i, &p) in pixels.iter().enumerate() {
+                acc_r[i] += ((p >> 16) & 0xFF) as f32;
+                acc_g[i] += ((p >>  8) & 0xFF) as f32;
+                acc_b[i] += ( p        & 0xFF) as f32;
+            }
+        }
+
+        let scale = 1.0 / num_samples as f32;
+        Ok((0..pixel_count).map(|i| {
+            let r = (acc_r[i] * scale).round() as u32;
+            let g = (acc_g[i] * scale).round() as u32;
+            let b = (acc_b[i] * scale).round() as u32;
+            (r << 16) | (g << 8) | b
+        }).collect())
+    }
+}
+
+/// Halton low-discrepancy sequence. index is 1-based. Returns value in (0, 1).
+fn halton(mut index: u32, base: u32) -> f32 {
+    let mut result = 0.0f32;
+    let mut denom = 1.0f32;
+    while index > 0 {
+        denom *= base as f32;
+        result += (index % base) as f32 / denom;
+        index /= base;
+    }
+    result
 }
 

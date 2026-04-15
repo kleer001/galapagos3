@@ -5,10 +5,95 @@ use galapagos3::renderer::GpuRenderer;
 use eframe::egui;
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 use rand::Rng;
+use std::collections::HashSet;
+use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ============================================================================
-// Domain types (moved from main.rs)
+// Render thread message types
+// ============================================================================
+
+struct RenderJob {
+    idx: usize,
+    ind: Individual,
+    w: u32,
+    h: u32,
+    ssaa_factor: u32,
+    aa_samples: u32, // >1 triggers multi-pass Halton-jittered AA (save path only)
+}
+
+struct RenderDone {
+    idx: usize,
+    pixels: Vec<u32>,
+    w: u32,
+    h: u32,
+    ssaa_factor: u32,
+}
+
+// ============================================================================
+// Tile render state machine
+// ============================================================================
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum TileState {
+    #[default]
+    Stale,       // not yet queued
+    Rendering,   // preview render in-flight
+    Preview,     // preview rendered and texture uploaded
+    HiResQueued, // hires render in-flight
+    HiRes,       // hires rendered and texture uploaded
+}
+
+// ============================================================================
+// Per-tile display state — replaces 5 parallel Vec fields
+// ============================================================================
+
+#[derive(Default)]
+struct TileSlot {
+    state: TileState,
+    texture: Option<TextureHandle>,
+    texture_is_hires: bool,
+    preview_pixels: Option<Vec<u32>>,
+    hires_pixels: Option<Vec<u32>>,
+}
+
+impl TileSlot {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+// ============================================================================
+// Pixel helpers — shared by upload and save paths
+// ============================================================================
+
+/// Convert packed 0x00RRGGBB pixels to RGBA bytes (alpha=255).
+fn pixels_to_rgba(pixels: &[u32]) -> Vec<u8> {
+    pixels.iter().flat_map(|&p| {
+        [((p >> 16) & 0xFF) as u8, ((p >> 8) & 0xFF) as u8, (p & 0xFF) as u8, 255u8]
+    }).collect()
+}
+
+fn pixels_to_image(pixels: &[u32], w: u32, h: u32) -> image::RgbaImage {
+    image::RgbaImage::from_raw(w, h, pixels_to_rgba(pixels))
+        .expect("pixel buffer size mismatch")
+}
+
+// ============================================================================
+// Adaptive preview size
+// ============================================================================
+
+/// Physical pixel dimensions for preview tiles, 16-aligned for GPU warp efficiency.
+fn compute_preview_size(avail: egui::Vec2, ppp: f32) -> (u32, u32) {
+    let cols = config::GRID_COLS as f32;
+    let rows = config::GRID_ROWS as f32;
+    let pw = ((avail.x / cols * ppp).ceil() as u32).clamp(64, config::TILE_W);
+    let ph = ((avail.y / rows * ppp).ceil() as u32).clamp(64, config::TILE_H);
+    ((pw + 15) & !15, (ph + 15) & !15)
+}
+
+// ============================================================================
+// Domain types
 // ============================================================================
 
 #[derive(Clone)]
@@ -21,48 +106,51 @@ pub struct Individual {
     pub v_remap: Genome,
 }
 
+fn make_palette_genome(rng: &mut impl Rng, max_depth: usize) -> Genome {
+    let mut candidate = Genome::new(Node::random_palette_with_depth(rng, max_depth));
+    for _ in 0..9 {
+        if candidate.palette_range() >= config::PALETTE_MIN_RANGE {
+            return candidate;
+        }
+        candidate = Genome::new(Node::random_palette_with_depth(rng, max_depth));
+    }
+    candidate
+}
+
 impl Individual {
     pub fn random_with_depth(rng: &mut impl Rng, max_depth: usize) -> Self {
         Self {
             h: Genome::new(Node::random_with_depth(rng, max_depth)),
             s: Genome::new(Node::random_with_depth(rng, max_depth)),
             v: Genome::new(Node::random_with_depth(rng, max_depth)),
-            h_remap: Genome::new(Node::random_palette_with_depth(rng, max_depth)),
-            s_remap: Genome::new(Node::random_palette_with_depth(rng, max_depth)),
-            v_remap: Genome::new(Node::random_palette_with_depth(rng, max_depth)),
+            h_remap: make_palette_genome(rng, max_depth),
+            s_remap: make_palette_genome(rng, max_depth),
+            v_remap: make_palette_genome(rng, max_depth),
         }
     }
 
-    async fn render_tile_gpu(&self, renderer: &GpuRenderer) -> Result<Vec<u32>, galapagos3::renderer::RenderError> {
-        let raw = |g: &Genome| -> Vec<(u32, i32, i32, i32, f32)> {
-            g.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect()
-        };
-        renderer.render_tile_from_raw(
-            &raw(&self.h), &raw(&self.s), &raw(&self.v),
-            &raw(&self.h_remap), &raw(&self.s_remap), &raw(&self.v_remap),
-        ).await
-    }
-
-    pub fn render_tile_cpu(&self) -> Vec<u32> {
-        let mut pixels = vec![0u32; config::TILE_W as usize * config::TILE_H as usize];
-        for y in 0..config::TILE_H {
-            for x in 0..config::TILE_W {
-                let nx = x as f32 / config::TILE_W as f32 * 2.0 - 1.0;
-                let ny = y as f32 / config::TILE_H as f32 * 2.0 - 1.0;
-                // Stage 1: spatial evaluation
+    pub fn render_tile_cpu_at_size(&self, w: u32, h: u32) -> Vec<u32> {
+        let mut pixels = vec![0u32; w as usize * h as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let nx = x as f32 / w as f32 * 2.0 - 1.0;
+                let ny = y as f32 / h as f32 * 2.0 - 1.0;
                 let raw_h = (self.h.eval(nx, ny, 0.0).fract() + 1.0).fract();
                 let raw_s = (self.s.eval(nx, ny, 0.0).fract() + 1.0).fract();
                 let raw_v = (self.v.eval(nx, ny, 0.0).fract() + 1.0).fract();
-                // Stage 2: palette remap (t = raw channel value)
                 let h = (self.h_remap.eval(0.0, 0.0, raw_h).fract() + 1.0).fract();
                 let s = (self.s_remap.eval(0.0, 0.0, raw_s).fract() + 1.0).fract();
                 let v = (self.v_remap.eval(0.0, 0.0, raw_v).fract() + 1.0).fract();
                 let [r, g, b] = hsv_to_rgb(h, s, v);
-                pixels[(y as usize) * config::TILE_W as usize + x as usize] =
+                pixels[y as usize * w as usize + x as usize] =
                     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
             }
         }
         pixels
+    }
+
+    pub fn to_raw_instrs(g: &Genome) -> Vec<(u32, i32, i32, i32, f32)> {
+        g.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect()
     }
 }
 
@@ -171,28 +259,62 @@ pub fn evolve_population(
 // ============================================================================
 
 pub struct App {
-    gpu_renderer: Option<GpuRenderer>,
-    tokio_rt: tokio::runtime::Runtime,
+    render_tx: mpsc::Sender<RenderJob>,
+    result_rx: mpsc::Receiver<RenderDone>,
     pop: Vec<Individual>,
     selected: Vec<bool>,
-    tile_textures: Vec<TextureHandle>,
-    tiles: Vec<Vec<u32>>,
+    tiles: Vec<TileSlot>,
+    preview_w: u32,
+    preview_h: u32,
     rt_config: RuntimeConfig,
     generation: usize,
-    needs_render: bool,
     settings_open: bool,
     zoom_tile: Option<usize>,
     hovered_tile: Option<usize>,
+    pending_save_idx: Option<usize>, // deferred single-tile save
+    pending_save_all: bool,          // deferred grid save
 }
 
 impl App {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let tokio_rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let (render_tx, render_rx) = mpsc::channel::<RenderJob>();
+        let (result_tx, result_rx) = mpsc::channel::<RenderDone>();
 
-        let gpu_renderer: Option<GpuRenderer> = tokio_rt.block_on(async {
-            match GpuRenderer::new().await {
-                Ok(r) => { println!("GPU renderer initialized."); Some(r) }
-                Err(e) => { eprintln!("GPU init failed: {e}, using CPU"); None }
+        // Background render thread: owns the tokio runtime and wgpu context.
+        // Main thread stays responsive; results arrive via result_rx each frame.
+        let egui_ctx = cc.egui_ctx.clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("render thread tokio runtime");
+            let gpu: Option<GpuRenderer> = rt.block_on(async {
+                match GpuRenderer::new().await {
+                    Ok(r) => { println!("GPU renderer initialized."); Some(r) }
+                    Err(e) => { eprintln!("GPU init failed: {e}, using CPU"); None }
+                }
+            });
+            for job in render_rx {
+                let raw = |g: &Genome| Individual::to_raw_instrs(g);
+                let pixels = if let Some(ref r) = gpu {
+                    let cpu_fallback = || job.ind.render_tile_cpu_at_size(job.w, job.h);
+                    if job.aa_samples > 1 {
+                        rt.block_on(r.render_tile_save_quality(
+                            &raw(&job.ind.h), &raw(&job.ind.s), &raw(&job.ind.v),
+                            &raw(&job.ind.h_remap), &raw(&job.ind.s_remap), &raw(&job.ind.v_remap),
+                            job.w, job.h, job.ssaa_factor, job.aa_samples,
+                        )).unwrap_or_else(|_| cpu_fallback())
+                    } else {
+                        rt.block_on(r.render_tile_at_size(
+                            &raw(&job.ind.h), &raw(&job.ind.s), &raw(&job.ind.v),
+                            &raw(&job.ind.h_remap), &raw(&job.ind.s_remap), &raw(&job.ind.v_remap),
+                            job.w, job.h, job.ssaa_factor,
+                        )).unwrap_or_else(|_| cpu_fallback())
+                    }
+                } else {
+                    job.ind.render_tile_cpu_at_size(job.w, job.h)
+                };
+                let _ = result_tx.send(RenderDone {
+                    idx: job.idx, pixels, w: job.w, h: job.h, ssaa_factor: job.ssaa_factor,
+                });
+                egui_ctx.request_repaint();
             }
         });
 
@@ -202,54 +324,145 @@ impl App {
             .map(|_| Individual::random_with_depth(&mut rng, rt_config.max_tree_depth))
             .collect();
 
-        let tiles: Vec<Vec<u32>> = pop.iter().map(|ind| {
-            if let Some(ref r) = gpu_renderer {
-                tokio_rt.block_on(ind.render_tile_gpu(r)).unwrap_or_else(|_| ind.render_tile_cpu())
-            } else {
-                ind.render_tile_cpu()
-            }
-        }).collect();
-
+        // preview_w/h start at 0; first update() computes from actual window size.
+        // content_rect() here returns 10,000×10,000 and is not usable.
         Self {
-            gpu_renderer,
-            tokio_rt,
+            render_tx,
+            result_rx,
             pop,
             selected: vec![false; config::POP_SIZE],
-            tile_textures: Vec::new(),
-            tiles,
+            tiles: (0..config::POP_SIZE).map(|_| TileSlot::default()).collect(),
+            preview_w: 0,
+            preview_h: 0,
             rt_config,
             generation: 0,
-            needs_render: true,
             settings_open: false,
             zoom_tile: None,
             hovered_tile: None,
+            pending_save_idx: None,
+            pending_save_all: false,
         }
     }
 
-    fn upload_tiles(&mut self, ctx: &Context) {
-        self.tile_textures.clear();
-        for (i, pixels) in self.tiles.iter().enumerate() {
-            let rgba: Vec<u8> = pixels.iter().flat_map(|&p| {
-                [((p >> 16) & 0xFF) as u8, ((p >> 8) & 0xFF) as u8, (p & 0xFF) as u8, 255u8]
-            }).collect();
-            let image = ColorImage::from_rgba_unmultiplied(
-                [config::TILE_W as usize, config::TILE_H as usize],
-                &rgba,
-            );
-            let handle = ctx.load_texture(format!("tile_{i}"), image, TextureOptions::default());
-            self.tile_textures.push(handle);
-        }
-    }
+    // ── Render queue management ───────────────────────────────────────────────
 
-    fn render_all_tiles(&mut self) {
-        self.tiles = self.pop.iter().map(|ind| {
-            if let Some(ref r) = self.gpu_renderer {
-                self.tokio_rt.block_on(ind.render_tile_gpu(r)).unwrap_or_else(|_| ind.render_tile_cpu())
-            } else {
-                ind.render_tile_cpu()
+    fn queue_stale_renders(&mut self) {
+        for idx in 0..config::POP_SIZE {
+            if self.tiles[idx].state == TileState::Stale {
+                let _ = self.render_tx.send(RenderJob {
+                    idx,
+                    ind: self.pop[idx].clone(),
+                    w: self.preview_w,
+                    h: self.preview_h,
+                    ssaa_factor: 1,
+                    aa_samples: 1,
+                });
+                self.tiles[idx].state = TileState::Rendering;
             }
-        }).collect();
+        }
     }
+
+    /// Queue hires renders for tiles missing them, then block until all arrive.
+    fn ensure_hires(&mut self, indices: &[usize]) {
+        let mut waiting: HashSet<usize> = indices.iter()
+            .filter(|&&i| self.tiles[i].hires_pixels.is_none())
+            .copied()
+            .collect();
+        for &idx in &waiting {
+            let _ = self.render_tx.send(RenderJob {
+                idx, ind: self.pop[idx].clone(),
+                w: config::TILE_W, h: config::TILE_H,
+                ssaa_factor: config::SAVE_SUPERSAMPLE_FACTOR,
+                aa_samples: config::SAVE_AA_SAMPLES,
+            });
+        }
+        self.wait_for_hires(&mut waiting);
+    }
+
+    // ── Texture upload ────────────────────────────────────────────────────────
+
+    fn upload_tile(&mut self, ctx: &Context, idx: usize, pixels: &[u32], w: u32, h: u32) {
+        let image = ColorImage::from_rgba_unmultiplied(
+            [w as usize, h as usize], &pixels_to_rgba(pixels),
+        );
+        self.tiles[idx].texture = Some(
+            ctx.load_texture(format!("tile_{idx}"), image, TextureOptions::default()),
+        );
+    }
+
+    /// Upload textures for tiles that have pixels but no up-to-date texture.
+    /// Handles both: parent preview tiles (carried over from evolve) and
+    /// hires tiles that arrived during a blocking save wait.
+    fn upload_pending_textures(&mut self, ctx: &Context) {
+        let pw = self.preview_w;
+        let ph = self.preview_h;
+        // Collect first to avoid split borrows
+        let work: Vec<(usize, Vec<u32>, u32, u32, bool)> = (0..config::POP_SIZE)
+            .filter_map(|idx| {
+                let slot = &self.tiles[idx];
+                if slot.state == TileState::HiRes && !slot.texture_is_hires {
+                    slot.hires_pixels.as_ref()
+                        .map(|p| (idx, p.clone(), config::TILE_W, config::TILE_H, true))
+                } else if slot.state == TileState::Preview && slot.texture.is_none() {
+                    slot.preview_pixels.as_ref()
+                        .map(|p| (idx, p.clone(), pw, ph, false))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for (idx, pixels, w, h, is_hires) in work {
+            self.upload_tile(ctx, idx, &pixels, w, h);
+            if is_hires {
+                self.tiles[idx].texture_is_hires = true;
+            }
+        }
+    }
+
+    // ── Per-frame result drain ────────────────────────────────────────────────
+
+    fn drain_render_results(&mut self, ctx: &Context) {
+        while let Ok(done) = self.result_rx.try_recv() {
+            let (idx, w, h, ssaa_factor) = (done.idx, done.w, done.h, done.ssaa_factor);
+            if ssaa_factor > 1 {
+                self.tiles[idx].hires_pixels = Some(done.pixels.clone());
+                self.tiles[idx].state = TileState::HiRes;
+                self.tiles[idx].texture_is_hires = true;
+                self.upload_tile(ctx, idx, &done.pixels, w, h);
+            } else if self.tiles[idx].state == TileState::Rendering
+                && w == self.preview_w && h == self.preview_h
+            {
+                self.tiles[idx].preview_pixels = Some(done.pixels.clone());
+                self.tiles[idx].state = TileState::Preview;
+                self.upload_tile(ctx, idx, &done.pixels, w, h);
+            }
+            // Wrong dimensions (resize race): silently drop — correct-size render is in-flight.
+        }
+    }
+
+    // ── Blocking hires wait (used by ensure_hires) ────────────────────────────
+
+    fn wait_for_hires(&mut self, waiting: &mut HashSet<usize>) {
+        while !waiting.is_empty() {
+            match self.result_rx.recv() {
+                Ok(done) => {
+                    if done.ssaa_factor > 1 {
+                        self.tiles[done.idx].hires_pixels = Some(done.pixels);
+                        self.tiles[done.idx].state = TileState::HiRes;
+                        waiting.remove(&done.idx);
+                    } else if done.w == self.preview_w && done.h == self.preview_h
+                        && self.tiles[done.idx].state == TileState::Rendering
+                    {
+                        self.tiles[done.idx].preview_pixels = Some(done.pixels);
+                        self.tiles[done.idx].state = TileState::Preview;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    }
+
+    // ── App actions ───────────────────────────────────────────────────────────
 
     pub fn do_evolve(&mut self) {
         let sel_indices: Vec<usize> = self.selected.iter().enumerate()
@@ -258,12 +471,28 @@ impl App {
 
         let mut rng = rand::thread_rng();
         println!("Evolving from {} selected...", sel_indices.len());
+
+        let mut old_tiles = std::mem::replace(
+            &mut self.tiles,
+            (0..config::POP_SIZE).map(|_| TileSlot::default()).collect(),
+        );
         self.pop = evolve_population(&self.pop, &sel_indices, &mut rng, &self.rt_config);
         self.selected = vec![false; config::POP_SIZE];
         self.generation += 1;
-        self.render_all_tiles();
-        self.needs_render = true;
         println!("Generation {}", self.generation);
+
+        // Parents land at positions 0..sel.len() — carry their pixel caches through.
+        for (new_idx, &old_idx) in sel_indices.iter().enumerate() {
+            self.tiles[new_idx].preview_pixels = old_tiles[old_idx].preview_pixels.take();
+            self.tiles[new_idx].hires_pixels   = old_tiles[old_idx].hires_pixels.take();
+            if self.tiles[new_idx].hires_pixels.is_some() {
+                self.tiles[new_idx].state = TileState::HiRes;
+            } else if self.tiles[new_idx].preview_pixels.is_some() {
+                self.tiles[new_idx].state = TileState::Preview;
+            }
+        }
+
+        self.queue_stale_renders();
     }
 
     pub fn do_randomize(&mut self) {
@@ -273,87 +502,67 @@ impl App {
             .map(|_| Individual::random_with_depth(&mut rng, self.rt_config.max_tree_depth))
             .collect();
         self.selected = vec![false; config::POP_SIZE];
-        self.render_all_tiles();
-        self.needs_render = true;
+        for slot in &mut self.tiles { slot.reset(); }
+        self.queue_stale_renders();
     }
 
     pub fn do_save(&mut self) {
+        let all: Vec<usize> = (0..config::POP_SIZE).collect();
+        self.ensure_hires(&all);
+
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         std::fs::create_dir_all("output").unwrap();
 
         let border = config::OUTPUT_BORDER_WIDTH as usize;
-        let tile_spacing_w = config::TILE_W as usize + border;
-        let tile_spacing_h = config::TILE_H as usize + border;
+        let tile_stride_w = config::TILE_W as usize + border;
+        let tile_stride_h = config::TILE_H as usize + border;
         let img_w = config::TILE_W as usize * config::GRID_COLS + border * (config::GRID_COLS + 1);
         let img_h = config::TILE_H as usize * config::GRID_ROWS + border * (config::GRID_ROWS + 1);
 
-        let mut img = image::RgbaImage::new(img_w as u32, img_h as u32);
+        let mut canvas = image::RgbaImage::new(img_w as u32, img_h as u32);
         let (br, bg, bb) = config::OUTPUT_BORDER_COLOR;
-        for y in 0..img_h {
-            for x in 0..img_w {
-                img.put_pixel(x as u32, y as u32, image::Rgba([
-                    (br * 255.0) as u8, (bg * 255.0) as u8, (bb * 255.0) as u8, 255,
-                ]));
-            }
-        }
+        let border_px = image::Rgba([(br * 255.0) as u8, (bg * 255.0) as u8, (bb * 255.0) as u8, 255]);
+        for px in canvas.pixels_mut() { *px = border_px; }
 
-        for (i, tile) in self.tiles.iter().enumerate() {
+        for i in 0..config::POP_SIZE {
+            let Some(pixels) = self.tiles[i].hires_pixels.as_ref() else { continue; };
             let col = i % config::GRID_COLS;
             let row = i / config::GRID_COLS;
-            let ox = col * tile_spacing_w + border;
-            let oy = row * tile_spacing_h + border;
-            for ty in 0..config::TILE_H as usize {
-                for tx in 0..config::TILE_W as usize {
-                    let px = tile[ty * config::TILE_W as usize + tx];
-                    let r = ((px >> 16) & 0xFF) as u8;
-                    let g = ((px >> 8) & 0xFF) as u8;
-                    let b = (px & 0xFF) as u8;
-                    img.put_pixel((ox + tx) as u32, (oy + ty) as u32, image::Rgba([r, g, b, 255]));
-                }
-            }
+            let ox = (col * tile_stride_w + border) as i64;
+            let oy = (row * tile_stride_h + border) as i64;
+            let tile_img = pixels_to_image(pixels, config::TILE_W, config::TILE_H);
+            image::imageops::replace(&mut canvas, &tile_img, ox, oy);
         }
 
         let filename = format!("output/{ts:019}.png");
-        img.save(&filename).expect("Failed to save PNG");
+        canvas.save(&filename).expect("Failed to save PNG");
         println!("Saved {filename}");
     }
 
     pub fn do_save_zoomed(&mut self, idx: usize) {
+        self.ensure_hires(&[idx]);
+
+        let pixels = match self.tiles[idx].hires_pixels.as_ref() {
+            Some(p) => p.clone(),
+            None => { eprintln!("Save failed: no pixels for tile {idx}"); return; }
+        };
+
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         std::fs::create_dir_all("output").unwrap();
 
-        // PNG — single tile, no border
-        let pixels = &self.tiles[idx];
-        let mut img = image::RgbaImage::new(config::TILE_W, config::TILE_H);
-        for y in 0..config::TILE_H as usize {
-            for x in 0..config::TILE_W as usize {
-                let px = pixels[y * config::TILE_W as usize + x];
-                img.put_pixel(x as u32, y as u32, image::Rgba([
-                    ((px >> 16) & 0xFF) as u8,
-                    ((px >> 8) & 0xFF) as u8,
-                    (px & 0xFF) as u8,
-                    255,
-                ]));
-            }
-        }
-        let png_path = format!("output/{ts:019}_{idx}.png");
-        img.save(&png_path).expect("Failed to save PNG");
+        pixels_to_image(&pixels, config::TILE_W, config::TILE_H)
+            .save(format!("output/{ts:019}_{idx}.png"))
+            .expect("Failed to save PNG");
 
-        // Expression text
         let ind = &self.pop[idx];
         let text = format!(
             "H:       {}\nS:       {}\nV:       {}\nH_remap: {}\nS_remap: {}\nV_remap: {}\n",
-            ind.h.to_expr_string(),
-            ind.s.to_expr_string(),
-            ind.v.to_expr_string(),
-            ind.h_remap.to_expr_string(),
-            ind.s_remap.to_expr_string(),
-            ind.v_remap.to_expr_string(),
+            ind.h.to_expr_string(), ind.s.to_expr_string(), ind.v.to_expr_string(),
+            ind.h_remap.to_expr_string(), ind.s_remap.to_expr_string(), ind.v_remap.to_expr_string(),
         );
-        let txt_path = format!("output/{ts:019}_{idx}.txt");
-        std::fs::write(&txt_path, &text).expect("Failed to save expression text");
-
-        println!("Saved {png_path} + {txt_path}");
+        std::fs::write(format!("output/{ts:019}_{idx}.txt"), &text)
+            .expect("Failed to save expression text");
+        println!("Saved output/{ts:019}_{idx}.png + output/{ts:019}_{idx}.txt");
     }
 }
 
@@ -361,10 +570,25 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        // Upload textures when tiles have been (re-)rendered
-        if self.needs_render {
-            self.upload_tiles(&ctx);
-            self.needs_render = false;
+        self.drain_render_results(&ctx);
+        self.upload_pending_textures(&ctx);
+
+        // Show wait cursor while saves are pending or tiles are still rendering.
+        let is_busy = self.pending_save_idx.is_some()
+            || self.pending_save_all
+            || self.tiles.iter().any(|t| matches!(t.state, TileState::Stale | TileState::Rendering));
+        if is_busy {
+            ctx.set_cursor_icon(egui::CursorIcon::Wait);
+        }
+
+        // Execute deferred saves — cursor was already shown last frame, OS will display it.
+        if let Some(idx) = self.pending_save_idx.take() {
+            self.do_save_zoomed(idx);
+            self.upload_pending_textures(&ctx);
+        } else if self.pending_save_all {
+            self.pending_save_all = false;
+            self.do_save();
+            self.upload_pending_textures(&ctx);
         }
 
         // ── Toolbar ──────────────────────────────────────────────────────────
@@ -377,24 +601,22 @@ impl eframe::App for App {
                     || (can_evolve && ctx.input(|i| i.key_pressed(egui::Key::Enter)))
                 {
                     self.do_evolve();
+                    self.upload_pending_textures(&ctx);
+                    ctx.set_cursor_icon(egui::CursorIcon::Wait);
                 }
                 if ui.button("⟳ Randomize").clicked()
                     || ctx.input(|i| i.key_pressed(egui::Key::R))
                 {
                     self.do_randomize();
+                    ctx.set_cursor_icon(egui::CursorIcon::Wait);
                 }
-                if ui.button("💾 Save").clicked()
-                    || (self.zoom_tile.is_none() && ctx.input(|i| i.key_pressed(egui::Key::S)))
-                {
-                    self.do_save();
+                if ui.button("💾 Save").clicked() {
+                    self.pending_save_all = true;
+                    ctx.set_cursor_icon(egui::CursorIcon::Wait);
+                    ctx.request_repaint();
                 }
-                // Z: zoom tile under mouse; Escape: exit zoom
                 if ctx.input(|i| i.key_pressed(egui::Key::Z)) {
-                    if self.zoom_tile.is_some() {
-                        self.zoom_tile = None;
-                    } else {
-                        self.zoom_tile = self.hovered_tile;
-                    }
+                    self.zoom_tile = if self.zoom_tile.is_some() { None } else { self.hovered_tile };
                 }
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                     self.zoom_tile = None;
@@ -432,57 +654,96 @@ impl eframe::App for App {
         // ── Main view — zoom or tile grid ────────────────────────────────────
         egui::CentralPanel::no_frame().show_inside(ui, |ui| {
             if let Some(idx) = self.zoom_tile {
-                // Zoom view: tile centered at 1:1 pixel size
+                // Request hires if not already in-flight or done
+                if self.tiles[idx].hires_pixels.is_none()
+                    && self.tiles[idx].state != TileState::HiResQueued
+                    && self.tiles[idx].state != TileState::HiRes
+                {
+                    let _ = self.render_tx.send(RenderJob {
+                        idx, ind: self.pop[idx].clone(),
+                        w: config::TILE_W, h: config::TILE_H,
+                        ssaa_factor: config::SUPERSAMPLE_FACTOR,
+                        aa_samples: 1,
+                    });
+                    self.tiles[idx].state = TileState::HiResQueued;
+                }
+
                 let panel_rect = ui.available_rect_before_wrap();
-                if idx < self.tile_textures.len() {
+                if let Some(ref handle) = self.tiles[idx].texture {
                     let painter = ui.painter().clone();
                     let ppp = ctx.pixels_per_point();
                     let native = egui::vec2(config::TILE_W as f32 / ppp, config::TILE_H as f32 / ppp);
                     let img_rect = egui::Rect::from_center_size(panel_rect.center(), native);
-                    ui.put(img_rect, egui::Image::new(&self.tile_textures[idx]).fit_to_exact_size(native));
+                    ui.put(img_rect, egui::Image::new(handle).fit_to_exact_size(native));
+
+                    if self.tiles[idx].state == TileState::HiResQueued {
+                        painter.text(
+                            egui::pos2(panel_rect.right() - 10.0, panel_rect.top() + 10.0),
+                            egui::Align2::RIGHT_TOP,
+                            "⋯ loading hi-res",
+                            egui::FontId::proportional(12.0),
+                            egui::Color32::from_rgba_unmultiplied(200, 200, 200, 180),
+                        );
+                    }
+
                     let hint = "S to save  |  Z or Esc to return";
-                    let hint_font = egui::FontId::proportional(14.0);
-                    let hint_pos = egui::pos2(panel_rect.center().x, panel_rect.bottom() - 24.0);
                     let bg_slot = painter.add(egui::Shape::Noop);
                     let text_rect = painter.text(
-                        hint_pos,
-                        egui::Align2::CENTER_CENTER,
-                        hint,
-                        hint_font,
+                        egui::pos2(panel_rect.center().x, panel_rect.bottom() - 24.0),
+                        egui::Align2::CENTER_CENTER, hint,
+                        egui::FontId::proportional(14.0),
                         egui::Color32::from_rgba_unmultiplied(200, 200, 200, 220),
                     );
                     painter.set(bg_slot, egui::Shape::rect_filled(
-                        text_rect.expand2(egui::vec2(8.0, 4.0)),
-                        4.0,
+                        text_rect.expand2(egui::vec2(8.0, 4.0)), 4.0,
                         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 160),
                     ));
                 }
                 if ctx.input(|i| i.key_pressed(egui::Key::S)) {
-                    self.do_save_zoomed(idx);
+                    self.pending_save_idx = Some(idx);
+                    ctx.set_cursor_icon(egui::CursorIcon::Wait);
+                    ctx.request_repaint();
                 }
             } else {
                 let avail = ui.available_size();
                 let cols = config::GRID_COLS as f32;
                 let rows = config::GRID_ROWS as f32;
-                let native_w = config::TILE_W as f32;
-                let native_h = config::TILE_H as f32;
                 const MIN_GAP: f32 = 2.0;
 
-                // Scale tiles DOWN if the screen is too small to fit at native resolution.
-                // Never scale UP — upscaling makes images blurry.
+                // Recompute adaptive preview size; re-queue on significant change.
+                let ppp = ctx.pixels_per_point();
+                let (new_pw, new_ph) = compute_preview_size(avail, ppp);
+                if new_pw != self.preview_w || new_ph != self.preview_h {
+                    let pw_ratio = new_pw as f32 / self.preview_w.max(1) as f32;
+                    let ph_ratio = new_ph as f32 / self.preview_h.max(1) as f32;
+                    if pw_ratio > 1.1 || pw_ratio < 0.9 || ph_ratio > 1.1 || ph_ratio < 0.9
+                        || self.preview_w == 0
+                    {
+                        self.preview_w = new_pw;
+                        self.preview_h = new_ph;
+                        for slot in &mut self.tiles {
+                            if slot.state != TileState::HiRes {
+                                slot.state = TileState::Stale;
+                                slot.preview_pixels = None;
+                                slot.texture = None;
+                                slot.texture_is_hires = false;
+                            }
+                        }
+                        self.queue_stale_renders();
+                    }
+                }
+
+                let native_w = config::TILE_W as f32;
+                let native_h = config::TILE_H as f32;
                 let scale = ((avail.x - MIN_GAP * (cols + 1.0)) / (cols * native_w))
                     .min((avail.y - MIN_GAP * (rows + 1.0)) / (rows * native_h))
                     .min(1.0)
                     .max(0.01);
                 let tile_w = (native_w * scale).floor();
                 let tile_h = (native_h * scale).floor();
-
-                // Distribute all remaining space equally as gaps (outer + inner).
-                // cols+1 gaps horizontally, rows+1 gaps vertically → gallery-style matting.
                 let gap_x = ((avail.x - cols * tile_w) / (cols + 1.0)).max(MIN_GAP).floor();
                 let gap_y = ((avail.y - rows * tile_h) / (rows + 1.0)).max(MIN_GAP).floor();
 
-                // Outer left/top padding equals the inter-tile gap for uniform matting.
                 let mut new_hovered: Option<usize> = None;
                 ui.add_space(gap_y);
                 ui.horizontal(|ui| {
@@ -492,35 +753,40 @@ impl eframe::App for App {
                         .spacing([gap_x, gap_y])
                         .show(ui, |ui| {
                             let tile_size = egui::vec2(tile_w, tile_h);
-                            for i in 0..self.tile_textures.len() {
-                                let handle = &self.tile_textures[i];
-                                let response = ui.add(
-                                    egui::Image::new(handle)
-                                        .fit_to_exact_size(tile_size)
-                                        .sense(egui::Sense::click()),
-                                );
-                                if response.hovered() {
-                                    new_hovered = Some(i);
-                                }
-                                if response.double_clicked() {
-                                    self.zoom_tile = Some(i);
-                                } else if response.clicked() {
-                                    self.selected[i] = !self.selected[i];
-                                }
-                                if self.selected[i] {
-                                    let (r, g, b) = config::SEL_COLOR;
-                                    ui.painter().rect_stroke(
-                                        response.rect,
-                                        0.0,
-                                        egui::Stroke::new(
-                                            config::BORDER_WIDTH as f32,
-                                            egui::Color32::from_rgb(
-                                                (r * 255.0) as u8,
-                                                (g * 255.0) as u8,
-                                                (b * 255.0) as u8,
+                            for i in 0..config::POP_SIZE {
+                                if let Some(ref handle) = self.tiles[i].texture {
+                                    let response = ui.add(
+                                        egui::Image::new(handle)
+                                            .fit_to_exact_size(tile_size)
+                                            .sense(egui::Sense::click()),
+                                    );
+                                    if response.hovered() { new_hovered = Some(i); }
+                                    if response.double_clicked() {
+                                        self.zoom_tile = Some(i);
+                                    } else if response.clicked() {
+                                        self.selected[i] = !self.selected[i];
+                                    }
+                                    if self.selected[i] {
+                                        let (r, g, b) = config::SEL_COLOR;
+                                        ui.painter().rect_stroke(
+                                            response.rect, 0.0,
+                                            egui::Stroke::new(
+                                                config::BORDER_WIDTH as f32,
+                                                egui::Color32::from_rgb(
+                                                    (r * 255.0) as u8,
+                                                    (g * 255.0) as u8,
+                                                    (b * 255.0) as u8,
+                                                ),
                                             ),
-                                        ),
-                                        egui::StrokeKind::Outside,
+                                            egui::StrokeKind::Outside,
+                                        );
+                                    }
+                                } else {
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        tile_size, egui::Sense::hover(),
+                                    );
+                                    ui.painter().rect_filled(
+                                        rect, 0.0, egui::Color32::from_gray(20),
                                     );
                                 }
                                 if (i + 1) % config::GRID_COLS == 0 {

@@ -200,6 +200,15 @@ impl Genome {
 
         if used > 0 { stack[used - 1] } else { 0.0 }
     }
+
+    /// Samples the genome as a 1D palette curve at 6 evenly-spaced t values.
+    /// Returns max minus min of the outputs — used to reject near-constant remap genomes.
+    pub fn palette_range(&self) -> f32 {
+        let vals = [0.0f32, 0.2, 0.4, 0.6, 0.8, 1.0].map(|t| self.eval(0.0, 0.0, t));
+        let min = vals.iter().cloned().fold(f32::INFINITY, f32::min);
+        let max = vals.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        max - min
+    }
 }
 
 #[derive(Debug, Clone)]

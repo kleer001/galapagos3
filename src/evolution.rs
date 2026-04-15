@@ -170,13 +170,20 @@ fn replace_node(node: &Node, rng: &mut impl Rng) -> Node {
 // ---- Palette genome mutation (PaletteT is the "X/Y" of palette trees) ----
 
 pub fn mutate_palette_with_params(genome: &Genome, rng: &mut impl Rng, params: &EvolutionParams) -> Genome {
-    let mut tree = genome.tree();
-    if rng.gen_bool(params.subtree_mutation_prob) {
-        tree = mutate_subtree_with_params(&tree, rng, params);
-    } else {
-        tree = replace_palette_node(&tree, rng);
+    let mut candidate = genome.clone();
+    for _ in 0..10 {
+        let mut tree = genome.tree();
+        if rng.gen_bool(params.subtree_mutation_prob) {
+            tree = mutate_subtree_with_params(&tree, rng, params);
+        } else {
+            tree = replace_palette_node(&tree, rng);
+        }
+        candidate = Genome::new(tree);
+        if candidate.palette_range() >= config::PALETTE_MIN_RANGE {
+            return candidate;
+        }
     }
-    Genome::new(tree)
+    candidate
 }
 
 fn replace_palette_node(node: &Node, rng: &mut impl Rng) -> Node {

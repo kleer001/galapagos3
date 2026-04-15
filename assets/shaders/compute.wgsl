@@ -74,6 +74,10 @@ struct OutputInfo {
     height: u32,
     tile_w: u32,
     tile_h: u32,
+    jitter_x: f32,
+    jitter_y: f32,
+    _pad0: f32,
+    _pad1: f32,
 };
 
 // Flat storage buffer of all instructions (6 genomes: H S V H_remap S_remap V_remap)
@@ -477,9 +481,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let sr_genome_idx = ind_idx * 6u + 4u;
     let vr_genome_idx = ind_idx * 6u + 5u;
 
-    // Normalize coordinates to [-1, 1]
-    let nx = f32(local_x) / f32(tile_w) * 2.0 - 1.0;
-    let ny = f32(local_y) / f32(tile_h) * 2.0 - 1.0;
+    // Normalize coordinates to [-1, 1], applying sub-pixel jitter for multi-pass AA.
+    // jitter_x/y are in render-pixel units; 0.0 for non-save renders.
+    let nx = (f32(local_x) + output_info.jitter_x) / f32(tile_w) * 2.0 - 1.0;
+    let ny = (f32(local_y) + output_info.jitter_y) / f32(tile_h) * 2.0 - 1.0;
 
     // Stage 1: spatial evaluation (t unused, pass 0.0)
     let raw_h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);

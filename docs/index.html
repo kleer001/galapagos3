@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Galápagos 3.0 — Evolutionary Art Generator</title>
+<style>
+:root {
+  --bg:      #f4f1ec;
+  --panel:   #ffffff;
+  --border:  #d8d4cc;
+  --text:    #282420;
+  --muted:   #8a8680;
+  --accent:  #3d3a36;
+  --green:   #2a6b2a;
+  --blue:    #1a5c8c;
+  --orange:  #b85c18;
+  --btn:     #eae6e0;
+  --btn-h:   #d8d3cb;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; line-height: 1.65; }
+
+nav {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 2rem; padding: 0.75rem 2rem;
+  font-size: 0.875rem;
+}
+.logo { font-weight: 700; font-size: 1rem; color: var(--accent); letter-spacing: -0.02em; text-decoration: none; }
+nav a { text-decoration: none; color: var(--muted); transition: color 0.15s; }
+nav a:hover { color: var(--text); }
+.nav-right { margin-left: auto; display: flex; gap: 1.5rem; align-items: center; }
+
+section { max-width: 960px; margin: 0 auto; padding: 3.5rem 2rem; border-bottom: 1px solid var(--border); }
+h2 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.4rem; color: var(--accent); }
+.sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; max-width: 640px; }
+
+/* ── Hero ── */
+#hero {
+  border-bottom: 1px solid var(--border);
+  text-align: center; padding: 5rem 2rem 4rem; max-width: 100%;
+}
+#hero h1 {
+  font-size: 3rem; font-weight: 800; letter-spacing: -0.04em;
+  color: var(--accent); margin-bottom: 0.75rem; line-height: 1.1;
+}
+#hero .tagline { color: var(--muted); font-size: 1.1rem; max-width: 580px; margin: 0 auto 2.5rem; }
+.hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-block; padding: 0.65rem 1.5rem; border-radius: 7px;
+  font-size: 0.9rem; font-weight: 600; text-decoration: none; transition: background 0.15s;
+  border: 1.5px solid transparent;
+}
+.btn-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.btn-primary:hover { background: #575350; }
+.btn-outline { background: transparent; color: var(--accent); border-color: var(--border); }
+.btn-outline:hover { background: var(--btn); }
+
+/* ── Install ── */
+.install-box {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden; margin-bottom: 1.5rem;
+}
+.install-label {
+  padding: 0.5rem 1rem; background: var(--btn); border-bottom: 1px solid var(--border);
+  font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;
+}
+.install-cmd {
+  padding: 1rem 1.25rem; font-family: monospace; font-size: 0.9rem;
+  color: var(--green); word-break: break-all; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.copy-btn {
+  flex-shrink: 0; padding: 0.3rem 0.75rem; border-radius: 5px; cursor: pointer;
+  background: var(--btn); color: var(--muted); border: 1px solid var(--border);
+  font-size: 0.75rem; transition: all 0.15s;
+}
+.copy-btn:hover { background: var(--btn-h); color: var(--text); }
+.install-note { font-size: 0.8rem; color: var(--muted); }
+.install-note code { font-family: monospace; font-size: 0.8rem; color: var(--blue); }
+details summary { cursor: pointer; color: var(--muted); font-size: 0.875rem; margin-top: 1rem; }
+details summary:hover { color: var(--text); }
+details .manual-steps {
+  margin-top: 1rem; padding: 1.25rem; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 8px; font-size: 0.875rem;
+}
+details .manual-steps pre {
+  background: #f0ece4; border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.75rem 1rem; margin: 0.5rem 0 1rem; font-size: 0.82rem;
+  color: var(--green); overflow-x: auto; font-family: monospace; line-height: 1.55;
+}
+details .manual-steps p { margin-bottom: 0.4rem; color: var(--muted); }
+
+/* ── Features ── */
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+.feature-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 1.5rem;
+}
+.feature-icon { font-size: 1.5rem; margin-bottom: 0.75rem; }
+.feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.4rem; color: var(--accent); }
+.feature-card p { font-size: 0.875rem; color: var(--muted); }
+
+/* ── Demo link ── */
+#demo { text-align: center; padding: 4rem 2rem; }
+#demo h2 { font-size: 2rem; margin-bottom: 0.6rem; }
+#demo p { color: var(--muted); margin-bottom: 2rem; }
+.demo-preview {
+  display: block; max-width: 720px; margin: 0 auto 2rem;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 3rem 2rem; color: var(--muted); font-size: 0.875rem;
+  text-decoration: none; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.demo-preview:hover { border-color: var(--accent); box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+.demo-preview-inner { font-size: 3rem; margin-bottom: 0.75rem; }
+.demo-preview-label { color: var(--accent); font-weight: 600; font-size: 1rem; }
+
+/* ── Controls ── */
+.controls-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.controls-table th {
+  text-align: left; padding: 0.5rem 0.75rem; font-size: 0.72rem;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.controls-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); }
+.controls-table tr:last-child td { border-bottom: none; }
+.controls-table td:first-child { font-family: monospace; font-size: 0.82rem; color: var(--blue); white-space: nowrap; }
+
+footer {
+  text-align: center; padding: 2.5rem; font-size: 0.8rem; color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+footer a { color: var(--muted); text-decoration: none; }
+footer a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="logo" href=".">Galápagos 3.0</a>
+  <a href="genome-explainer.html">How It Works</a>
+  <div class="nav-right">
+    <a href="https://github.com/kleer001/galapagos3">GitHub</a>
+  </div>
+</nav>
+
+<!-- ── Hero ──────────────────────────────────────────────── -->
+<div id="hero">
+  <h1>Evolutionary<br>Art Generator</h1>
+  <p class="tagline">
+    Breed mathematical expression trees into 4K images. Pick the ones you like — the system does the rest.
+  </p>
+  <div class="hero-actions">
+    <a href="genome-explainer.html" class="btn btn-primary">Interactive Explainer</a>
+    <a href="https://github.com/kleer001/galapagos3" class="btn btn-outline">View on GitHub</a>
+  </div>
+</div>
+
+<!-- ── Install ───────────────────────────────────────────── -->
+<section id="install">
+  <h2>Get Started</h2>
+  <p class="sub">One command on Linux or macOS. Installs Rust if needed, pulls system deps, clones, and builds.</p>
+
+  <div class="install-box">
+    <div class="install-label">Linux / macOS — Terminal</div>
+    <div class="install-cmd">
+      <span id="cmd-text">curl -sSL https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.sh | bash</span>
+      <button class="copy-btn" onclick="copyCmd()">Copy</button>
+    </div>
+  </div>
+
+  <p class="install-note">
+    After the build finishes, run: <code>cd ~/galapagos3 &amp;&amp; cargo run --release</code><br>
+    On Linux if the window doesn't appear: <code>WINIT_UNIX_BACKEND=x11 cargo run --release</code>
+  </p>
+
+  <details>
+    <summary>Manual setup (step by step)</summary>
+    <div class="manual-steps">
+      <p><strong>1. Install Rust</strong></p>
+      <pre>curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</pre>
+      <p><strong>2. Install system deps (Ubuntu / Debian)</strong></p>
+      <pre>sudo apt-get install -y libvulkan-dev mesa-vulkan-drivers \
+    libwayland-dev libxkbcommon-dev libudev-dev pkg-config build-essential</pre>
+      <p><strong>3. Clone and build</strong></p>
+      <pre>git clone https://github.com/kleer001/galapagos3.git
+cd galapagos3
+cargo run --release</pre>
+    </div>
+  </details>
+</section>
+
+<!-- ── Features ──────────────────────────────────────────── -->
+<section id="features">
+  <h2>What It Does</h2>
+  <p class="sub">Every image is a formula. Every formula is a tree. Every tree can be bred.</p>
+  <div class="features">
+    <div class="feature-card">
+      <div class="feature-icon">🧬</div>
+      <h3>Genetic Programming</h3>
+      <p>Each image is defined by six expression trees — hue, saturation, value, and three palette remaps. Trees mutate and cross over each generation.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>GPU Accelerated</h3>
+      <p>All 16 tiles render in a single wgpu compute dispatch. WGSL shaders evaluate bytecode-compiled genomes at 1920×1080 with 2× SSAA.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎨</div>
+      <h3>47 Operators</h3>
+      <p>From basic trig to Worley noise, FBM, Chebyshev distance, and palette-T indexing. Arity types: terminal, unary, binary, ternary.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💾</div>
+      <h3>Save Quality Output</h3>
+      <p>S key in zoom view saves the tile at full 1920×1080 with 8-pass Halton-jittered AA and Gaussian reconstruction — 32 samples per pixel.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Demo ───────────────────────────────────────────────── -->
+<section id="demo">
+  <h2>Interactive Explainer</h2>
+  <p>Walk through building blocks, tree growth, pixel evaluation, HSV coloring, palette remapping, and evolution — all live in the browser.</p>
+  <a href="genome-explainer.html" class="demo-preview">
+    <div class="demo-preview-inner">🌀 🌿 🔷</div>
+    <div class="demo-preview-label">Open: From Genome to Image →</div>
+    <div style="margin-top:0.4rem; font-size:0.8rem;">
+      Click operators · grow expression trees · watch pixels form in real time
+    </div>
+  </a>
+  <a href="genome-explainer.html" class="btn btn-primary">Launch Interactive Guide</a>
+</section>
+
+<!-- ── Controls ──────────────────────────────────────────── -->
+<section id="controls">
+  <h2>Controls</h2>
+  <p class="sub">Mouse + keyboard.</p>
+  <table class="controls-table">
+    <thead>
+      <tr><th>Input</th><th>Effect</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Click tile</td><td>Select / deselect for breeding</td></tr>
+      <tr><td>Enter</td><td>Breed selected tiles → next generation</td></tr>
+      <tr><td>Z (hover) or double-click</td><td>Zoom tile to full 1920×1080</td></tr>
+      <tr><td>S (in zoom view)</td><td>Save tile as PNG + expression text file</td></tr>
+      <tr><td>Escape</td><td>Exit zoom view</td></tr>
+      <tr><td>R</td><td>Randomize entire population</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <p>
+    <a href="https://github.com/kleer001/galapagos3">GitHub</a> &middot;
+    <a href="genome-explainer.html">How It Works</a> &middot;
+    Inspired by <a href="https://www.karlsims.com/evolved-virtual-creatures.html">Karl Sims (1991)</a>
+  </p>
+</footer>
+
+<script>
+function copyCmd() {
+  const text = document.getElementById('cmd-text').textContent.trim();
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1800);
+  });
+}
+</script>
+</body>
+</html>
