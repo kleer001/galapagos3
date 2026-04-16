@@ -13,6 +13,8 @@ pub const DEFAULT_BINARY_CHILD_SIDE_PROB: f64 = config::BINARY_CHILD_SIDE_PROB;
 pub const DEFAULT_FRESH_RANDOM_COUNT: usize = config::FRESH_RANDOM_COUNT;
 pub const DEFAULT_MAX_TREE_DEPTH: usize = config::MAX_TREE_DEPTH;
 pub const DEFAULT_EXPRESSION_MUTATION_PROB: f64 = config::EXPRESSION_MUTATION_PROB;
+pub const DEFAULT_DROPOUT_PROB: f64 = config::DROPOUT_PROB;
+pub const DEFAULT_DUPLICATION_PROB: f64 = config::DUPLICATION_PROB;
 
 /// Runtime evolution parameters (can be modified during execution)
 #[derive(Clone, Copy)]
@@ -21,6 +23,8 @@ pub struct EvolutionParams {
     pub subtree_stop_prob: f64,
     pub binary_child_side_prob: f64,
     pub expression_mutation_prob: f64,
+    pub dropout_prob: f64,
+    pub duplication_prob: f64,
 }
 
 impl Default for EvolutionParams {
@@ -30,6 +34,8 @@ impl Default for EvolutionParams {
             subtree_stop_prob: DEFAULT_SUBTREE_STOP_PROB,
             binary_child_side_prob: DEFAULT_BINARY_CHILD_SIDE_PROB,
             expression_mutation_prob: DEFAULT_EXPRESSION_MUTATION_PROB,
+            dropout_prob: DEFAULT_DROPOUT_PROB,
+            duplication_prob: DEFAULT_DUPLICATION_PROB,
         }
     }
 }
@@ -47,6 +53,12 @@ pub fn mutate_with_params(genome: &Genome, rng: &mut impl Rng, params: &Evolutio
     }
     if params.expression_mutation_prob > 0.0 {
         expression_mutate(&mut tree, params.expression_mutation_prob, rng);
+    }
+    if params.dropout_prob > 0.0 && rng.gen_bool(params.dropout_prob) {
+        dropout_node(&mut tree, rng);
+    }
+    if params.duplication_prob > 0.0 && rng.gen_bool(params.duplication_prob) {
+        duplicate_subtree(&mut tree, rng);
     }
     Genome::new(tree)
 }
@@ -187,6 +199,12 @@ pub fn mutate_palette_with_params(genome: &Genome, rng: &mut impl Rng, params: &
         if params.expression_mutation_prob > 0.0 {
             expression_mutate_palette(&mut tree, params.expression_mutation_prob, rng);
         }
+        if params.dropout_prob > 0.0 && rng.gen_bool(params.dropout_prob) {
+            dropout_node(&mut tree, rng);
+        }
+        if params.duplication_prob > 0.0 && rng.gen_bool(params.duplication_prob) {
+            duplicate_subtree(&mut tree, rng);
+        }
         candidate = Genome::new(tree);
         if candidate.palette_range() >= config::PALETTE_MIN_RANGE {
             return candidate;
@@ -320,6 +338,82 @@ pub fn expression_mutate(node: &mut Node, prob: f64, rng: &mut impl Rng) {
 
 pub fn expression_mutate_palette(node: &mut Node, prob: f64, rng: &mut impl Rng) {
     expression_mutate_node(node, prob, MutationContext::Palette, rng);
+}
+
+// ============================================================================
+// TREE TRAVERSAL HELPERS (pre-order indexing)
+// ============================================================================
+
+fn count_nodes(node: &Node) -> usize {
+    1 + node.children.iter().map(count_nodes).sum::<usize>()
+}
+
+fn get_node_at(node: &Node, index: usize) -> Option<&Node> {
+    if index == 0 { return Some(node); }
+    let mut remaining = index - 1;
+    for child in &node.children {
+        let size = count_nodes(child);
+        if remaining < size {
+            return get_node_at(child, remaining);
+        }
+        remaining -= size;
+    }
+    None
+}
+
+fn replace_node_at(node: &mut Node, index: usize, replacement: Node) {
+    if index == 0 { *node = replacement; return; }
+    let mut remaining = index - 1;
+    for child in &mut node.children {
+        let size = count_nodes(child);
+        if remaining < size {
+            replace_node_at(child, remaining, replacement);
+            return;
+        }
+        remaining -= size;
+    }
+}
+
+// ============================================================================
+// DROPOUT — replace a random non-root subtree with a constant
+// ============================================================================
+
+fn dropout_node(node: &mut Node, rng: &mut impl Rng) {
+    if node.children.is_empty() { return; }
+
+    let idx = rng.gen_range(0..node.children.len());
+    let child = &mut node.children[idx];
+
+    if !child.children.is_empty() && !rng.gen_bool(0.5) {
+        dropout_node(child, rng);
+    } else {
+        *child = Node::constant(rng.gen::<f32>());
+    }
+}
+
+// ============================================================================
+// DUPLICATION — copy a subtree to another position (self-crossover)
+// ============================================================================
+
+fn duplicate_subtree(node: &mut Node, rng: &mut impl Rng) {
+    let total = count_nodes(node);
+    if total < 3 { return; }
+
+    let src_idx = rng.gen_range(0..total);
+
+    let mut dst_idx = rng.gen_range(1..total);
+    if dst_idx == src_idx {
+        dst_idx = if dst_idx + 1 < total { dst_idx + 1 } else { 1 };
+    }
+
+    let source_clone = get_node_at(node, src_idx).unwrap().clone();
+
+    let dst_size = count_nodes(get_node_at(node, dst_idx).unwrap());
+    let src_size = count_nodes(&source_clone);
+    let new_total = total - dst_size + src_size;
+    if new_total > config::MAX_TREE_SIZE { return; }
+
+    replace_node_at(node, dst_idx, source_clone);
 }
 
 pub fn crossover(a: &Genome, b: &Genome, rng: &mut impl Rng) -> Genome {
@@ -611,5 +705,106 @@ mod tests {
             let tree = mutated.tree();
             assert!(verify_arity(&tree), "mutate_with_params produced invalid arity");
         }
+    }
+
+    // ── Dropout tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn dropout_protects_root() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut tree = Node::random_with_depth(&mut rng, 8);
+            let root_op = tree.op;
+            let root_children = tree.children.len();
+            dropout_node(&mut tree, &mut rng);
+            assert_eq!(tree.op, root_op, "Dropout changed root op");
+            assert_eq!(tree.children.len(), root_children, "Dropout changed root arity");
+        }
+    }
+
+    #[test]
+    fn dropout_never_increases_tree_size() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut tree = Node::random_with_depth(&mut rng, 8);
+            let before = count_nodes(&tree);
+            dropout_node(&mut tree, &mut rng);
+            let after = count_nodes(&tree);
+            assert!(after <= before, "Dropout grew tree from {} to {}", before, after);
+        }
+    }
+
+    #[test]
+    fn dropout_produces_valid_trees() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut tree = Node::random_with_depth(&mut rng, 8);
+            dropout_node(&mut tree, &mut rng);
+            assert!(verify_arity(&tree), "Dropout produced invalid arity");
+        }
+    }
+
+    // ── Duplication tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn duplication_protects_root() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut tree = Node::random_with_depth(&mut rng, 8);
+            let root_op = tree.op;
+            let root_children = tree.children.len();
+            duplicate_subtree(&mut tree, &mut rng);
+            assert_eq!(tree.op, root_op, "Duplication changed root op");
+            assert_eq!(tree.children.len(), root_children, "Duplication changed root arity");
+        }
+    }
+
+    #[test]
+    fn duplication_produces_valid_trees() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut tree = Node::random_with_depth(&mut rng, 8);
+            duplicate_subtree(&mut tree, &mut rng);
+            assert!(verify_arity(&tree), "Duplication produced invalid arity");
+        }
+    }
+
+    #[test]
+    fn duplication_respects_max_size() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let mut tree = Node::random_with_depth(&mut rng, 10);
+            duplicate_subtree(&mut tree, &mut rng);
+            let size = count_nodes(&tree);
+            assert!(size <= config::MAX_TREE_SIZE,
+                "Duplication exceeded MAX_TREE_SIZE: {}", size);
+        }
+    }
+
+    #[test]
+    fn duplication_creates_repeated_subtree() {
+        let mut rng = rand::thread_rng();
+        let mut found_repeat = false;
+        for _ in 0..100 {
+            let mut tree = make_test_tree();
+            duplicate_subtree(&mut tree, &mut rng);
+            let genome = Genome::new(tree);
+            let expr = genome.to_expr_string();
+            // Check if any non-trivial substring appears more than once
+            let parts: Vec<&str> = expr.split(|c: char| c == '(' || c == ')' || c == ',' || c == ' ')
+                .filter(|s| s.len() > 1)
+                .collect();
+            for i in 0..parts.len() {
+                for j in (i + 1)..parts.len() {
+                    if parts[i] == parts[j] {
+                        found_repeat = true;
+                        break;
+                    }
+                }
+                if found_repeat { break; }
+            }
+            if found_repeat { break; }
+        }
+        assert!(found_repeat, "Duplication never created a repeated pattern in 100 tries");
     }
 }

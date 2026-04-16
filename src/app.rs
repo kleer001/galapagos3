@@ -181,6 +181,8 @@ pub struct RuntimeConfig {
     pub subtree_stop_prob: f64,
     pub binary_child_side_prob: f64,
     pub expression_mutation_prob: f64,
+    pub dropout_prob: f64,
+    pub duplication_prob: f64,
     pub fresh_random_count: usize,
     pub max_tree_depth: usize,
 }
@@ -192,6 +194,8 @@ impl RuntimeConfig {
             subtree_stop_prob: config::SUBTREE_STOP_PROB,
             binary_child_side_prob: config::BINARY_CHILD_SIDE_PROB,
             expression_mutation_prob: config::EXPRESSION_MUTATION_PROB,
+            dropout_prob: config::DROPOUT_PROB,
+            duplication_prob: config::DUPLICATION_PROB,
             fresh_random_count: config::FRESH_RANDOM_COUNT,
             max_tree_depth: config::MAX_TREE_DEPTH,
         }
@@ -213,6 +217,8 @@ pub fn evolve_population(
         subtree_stop_prob: rt_config.subtree_stop_prob,
         binary_child_side_prob: rt_config.binary_child_side_prob,
         expression_mutation_prob: rt_config.expression_mutation_prob,
+        dropout_prob: rt_config.dropout_prob,
+        duplication_prob: rt_config.duplication_prob,
     };
 
     if sel.is_empty() {
@@ -647,6 +653,10 @@ impl eframe::App for App {
                         .text("BinarySide"));
                     ui.add(egui::Slider::new(&mut self.rt_config.expression_mutation_prob, 0.0..=0.30)
                         .text("ExprMut"));
+                    ui.add(egui::Slider::new(&mut self.rt_config.dropout_prob, 0.0..=0.30)
+                        .text("Dropout"));
+                    ui.add(egui::Slider::new(&mut self.rt_config.duplication_prob, 0.0..=0.30)
+                        .text("Duplicate"));
                     ui.add(egui::DragValue::new(&mut self.rt_config.fresh_random_count)
                         .range(0..=(config::POP_SIZE / 2))
                         .prefix("FreshRand: "));
