@@ -74,6 +74,18 @@ pub const BINARY_CHILD_SIDE_PROB: f64 = 0.5;
 /// 2 out of 16 = 12.5% diversity injection.
 pub const FRESH_RANDOM_COUNT: usize = 2;
 
+/// Per-node probability of swapping an operator with a same-arity alternative.
+/// Capped at 0.30 in the implementation. With ~30-50 node trees, 0.10 yields ~3-5 swaps.
+pub const EXPRESSION_MUTATION_PROB: f64 = 0.10;
+
+/// Per-mutation-event probability of replacing a random non-root subtree with a constant.
+/// Acts as a simplification/regularizer against tree bloat. Root is protected.
+pub const DROPOUT_PROB: f64 = 0.05;
+
+/// Per-mutation-event probability of copying a subtree to another location in the same tree.
+/// Creates self-similarity patterns. Root destination is protected.
+pub const DUPLICATION_PROB: f64 = 0.05;
+
 /// Minimum output range a palette remap genome must span across t=[0,1].
 /// Genomes below this threshold are regenerated or re-mutated (up to 10 attempts).
 pub const PALETTE_MIN_RANGE: f32 = 0.05;
