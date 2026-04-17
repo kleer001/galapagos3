@@ -54,6 +54,8 @@ pub const SEL_COLOR: (f32, f32, f32) = (1.0, 0.53, 0.0);
 pub const MAX_TREE_DEPTH: usize = 18;
 pub const MIN_TREE_SIZE: usize = 6;
 pub const MAX_TREE_SIZE: usize = 1024;
+/// Minimum depth before leaves (terminals / Nullary ops) are allowed during generation.
+pub const MIN_SPATIAL_DEPTH: usize = 3;
 
 // ============================================================================
 // EVOLUTION PARAMETERS
@@ -89,6 +91,11 @@ pub const DUPLICATION_PROB: f64 = 0.05;
 /// Minimum output range a palette remap genome must span across t=[0,1].
 /// Genomes below this threshold are regenerated or re-mutated (up to 10 attempts).
 pub const PALETTE_MIN_RANGE: f32 = 0.05;
+
+/// Minimum range and mean for H, S, V channels across a sample grid.
+/// Any channel below either threshold triggers a re-roll during generation.
+pub const MIN_CHANNEL_RANGE: f32 = 0.05;
+pub const MIN_CHANNEL_MEAN: f32 = 0.05;
 
 // ============================================================================
 // UI LAYOUT

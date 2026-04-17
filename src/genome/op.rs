@@ -53,9 +53,12 @@ fn eval_mirror_x(x: f32, _y: f32, _v: f32) -> f32 { x.abs() }
 fn eval_mirror_y(_x: f32, y: f32, _v: f32) -> f32 { y.abs() }
 
 fn eval_sqrt(v: f32) -> f32 { v.sqrt().max(0.0) }
+fn eval_log(v: f32) -> f32 { if v > 0.0 { v.ln() } else { 0.0 } }
+fn eval_tan(v: f32) -> f32 { let t = v.tan(); if t.is_finite() { t } else { 0.0 } }
+fn eval_exp(v: f32) -> f32 { let e = v.exp(); if e.is_finite() { e } else { 0.0 } }
 fn eval_acos(v: f32) -> f32 { v.clamp(-1.0, 1.0).acos() }
 fn eval_asin(v: f32) -> f32 { v.clamp(-1.0, 1.0).asin() }
-fn eval_sign(v: f32) -> f32 { v.copysign(1.0) }
+fn eval_sign(v: f32) -> f32 { if v > 0.0 { 1.0 } else if v < 0.0 { -1.0 } else { 0.0 } }
 fn eval_negate(v: f32) -> f32 { -v }
 fn eval_reciprocal(v: f32) -> f32 { if v.abs() >= 1e-6 { 1.0 / v } else { 0.0 } }
 fn eval_invert(v: f32) -> f32 { 1.0 - v }
@@ -75,7 +78,9 @@ fn eval_clamp(v: f32, lo: f32, hi: f32) -> f32 {
 
 fn eval_mix(lo: f32, hi: f32, t: f32) -> f32 { lo + (hi - lo) * t }
 fn eval_smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    let denom = e1 - e0;
+    if denom.abs() < 1e-6 { return 0.0; }
+    let t = ((x - e0) / denom).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
@@ -155,18 +160,18 @@ fn eval_fbm(vx: f32, vy: f32, octaves: i32) -> f32 {
 // To disable an op: comment out or remove its line.
 // ============================================================================
 
-pub static OP_REGISTRY: [OpDef; 47] = [
+pub static OP_REGISTRY: [OpDef; 45] = [
     // Phase 1: Core
     OpDef { opcode: OpCode::X,          name: "X",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_x) },
     OpDef { opcode: OpCode::Y,          name: "Y",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_y) },
     OpDef { opcode: OpCode::Const,      name: "Const",      arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_const) },
     OpDef { opcode: OpCode::Sin,        name: "Sin",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::sin) },
     OpDef { opcode: OpCode::Cos,        name: "Cos",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::cos) },
-    OpDef { opcode: OpCode::Tan,        name: "Tan",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::tan) },
+    OpDef { opcode: OpCode::Tan,        name: "Tan",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_tan) },
     OpDef { opcode: OpCode::Abs,        name: "Abs",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::abs) },
     OpDef { opcode: OpCode::Sqrt,       name: "Sqrt",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_sqrt) },
-    OpDef { opcode: OpCode::Log,        name: "Log",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::ln) },
-    OpDef { opcode: OpCode::Exp,        name: "Exp",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::exp) },
+    OpDef { opcode: OpCode::Log,        name: "Log",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_log) },
+    OpDef { opcode: OpCode::Exp,        name: "Exp",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_exp) },
     OpDef { opcode: OpCode::Fract,      name: "Fract",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::fract) },
     OpDef { opcode: OpCode::Add,        name: "Add",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_add) },
     OpDef { opcode: OpCode::Sub,        name: "Sub",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_sub) },
@@ -187,8 +192,6 @@ pub static OP_REGISTRY: [OpDef; 47] = [
     OpDef { opcode: OpCode::Clamp,      name: "Clamp",      arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_clamp) },
     OpDef { opcode: OpCode::Sign,       name: "Sign",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_sign) },
     OpDef { opcode: OpCode::Floor,      name: "Floor",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::floor) },
-    OpDef { opcode: OpCode::Ceil,       name: "Ceil",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::ceil) },
-    OpDef { opcode: OpCode::Round,      name: "Round",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::round) },
     OpDef { opcode: OpCode::Negate,     name: "Negate",     arity: Arity::Unary,    eval: EvalFn::Unary(eval_negate) },
     OpDef { opcode: OpCode::Step,       name: "Step",       arity: Arity::Binary,   eval: EvalFn::Binary(eval_step) },
     OpDef { opcode: OpCode::Reciprocal, name: "Reciprocal", arity: Arity::Unary,    eval: EvalFn::Unary(eval_reciprocal) },

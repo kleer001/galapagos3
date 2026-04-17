@@ -43,26 +43,24 @@ const OP_MAX: u32 = 25;
 const OP_CLAMP: u32 = 26;
 const OP_SIGN: u32 = 27;
 const OP_FLOOR: u32 = 28;
-const OP_CEIL: u32 = 29;
-const OP_ROUND: u32 = 30;
-const OP_NEGATE: u32 = 31;
-const OP_STEP: u32 = 32;
-const OP_RECIPROCAL: u32 = 33;
-const OP_INVERT: u32 = 34;
+const OP_NEGATE: u32 = 29;
+const OP_STEP: u32 = 30;
+const OP_RECIPROCAL: u32 = 31;
+const OP_INVERT: u32 = 32;
 // Phase 3 operators
-const OP_VALUE_NOISE: u32 = 35;
-const OP_FBM: u32 = 36;
-const OP_MIRROR_X: u32 = 37;
-const OP_MIRROR_Y: u32 = 38;
+const OP_VALUE_NOISE: u32 = 33;
+const OP_FBM: u32 = 34;
+const OP_MIRROR_X: u32 = 35;
+const OP_MIRROR_Y: u32 = 36;
 // New operators
-const OP_ATAN2: u32 = 39;
-const OP_MOD: u32 = 40;
-const OP_WORLEY: u32 = 41;
-const OP_TRIWAVE: u32 = 42;
-const OP_CHEBYSHEV: u32 = 43;
-const OP_MANHATTAN: u32 = 44;
-const OP_SINFOLD: u32 = 45;
-const OP_PALETTE_T: u32 = 46;
+const OP_ATAN2: u32 = 37;
+const OP_MOD: u32 = 38;
+const OP_WORLEY: u32 = 39;
+const OP_TRIWAVE: u32 = 40;
+const OP_CHEBYSHEV: u32 = 41;
+const OP_MANHATTAN: u32 = 42;
+const OP_SINFOLD: u32 = 43;
+const OP_PALETTE_T: u32 = 44;
 
 // Maximum stack depth for interpreter (auto-generated from config.rs)
 const MAX_STACK: u32 = 256;
@@ -150,7 +148,7 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
             }
             case OP_TAN {
                 let idx = u32(instr.a);
-                if (idx < sp) { result = tan(stack[idx]); }
+                if (idx < sp) { let t = tan(stack[idx]); result = select(0.0, t, t == t && abs(t) < 1e10); }
                 else { result = 0.0; }
             }
             case OP_ABS {
@@ -160,17 +158,17 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
             }
             case OP_SQRT {
                 let idx = u32(instr.a);
-                if (idx < sp) { result = sqrt(stack[idx]); }
+                if (idx < sp) { result = sqrt(max(stack[idx], 0.0)); }
                 else { result = 0.0; }
             }
             case OP_LOG {
                 let idx = u32(instr.a);
-                if (idx < sp) { result = log(stack[idx]); }
+                if (idx < sp) { result = select(0.0, log(stack[idx]), stack[idx] > 0.0); }
                 else { result = 0.0; }
             }
             case OP_EXP {
                 let idx = u32(instr.a);
-                if (idx < sp) { result = exp(stack[idx]); }
+                if (idx < sp) { let e = exp(stack[idx]); result = select(0.0, e, e == e && e < 1e38); }
                 else { result = 0.0; }
             }
             case OP_FRACT {
@@ -207,8 +205,10 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
             case OP_POW {
                 let a_idx = u32(instr.a);
                 let b_idx = u32(instr.b);
-                if (a_idx < sp && b_idx < sp) { result = pow(stack[a_idx], stack[b_idx]); }
-                else { result = 0.0; }
+                if (a_idx < sp && b_idx < sp) {
+                    if (stack[a_idx] > 0.0) { result = pow(stack[a_idx], stack[b_idx]); }
+                    else { result = 0.0; }
+                } else { result = 0.0; }
             }
             case OP_MIX {
                 let a_idx = u32(instr.a);
@@ -222,8 +222,13 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
                 let b_idx = u32(instr.b);
                 let c_idx = u32(instr.c);
                 if (a_idx < sp && b_idx < sp && c_idx < sp) {
-                    let t = clamp((stack[c_idx] - stack[a_idx]) / (stack[b_idx] - stack[a_idx]), 0.0, 1.0);
-                    result = t * t * (3.0 - 2.0 * t);
+                    let denom = stack[b_idx] - stack[a_idx];
+                    if (abs(denom) < 1e-6) {
+                        result = 0.0;
+                    } else {
+                        let t = clamp((stack[c_idx] - stack[a_idx]) / denom, 0.0, 1.0);
+                        result = t * t * (3.0 - 2.0 * t);
+                    }
                 } else { result = 0.0; }
             }
             // Phase 2 operators
@@ -273,8 +278,11 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
                 let a_idx = u32(instr.a);
                 let b_idx = u32(instr.b);
                 let c_idx = u32(instr.c);
-                if (a_idx < sp && b_idx < sp && c_idx < sp) { result = clamp(stack[a_idx], stack[b_idx], stack[c_idx]); }
-                else { result = 0.0; }
+                if (a_idx < sp && b_idx < sp && c_idx < sp) {
+                    let lo = min(stack[b_idx], stack[c_idx]);
+                    let hi = max(stack[b_idx], stack[c_idx]);
+                    result = clamp(stack[a_idx], lo, hi);
+                } else { result = 0.0; }
             }
             case OP_SIGN {
                 let idx = u32(instr.a);
@@ -284,16 +292,6 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
             case OP_FLOOR {
                 let idx = u32(instr.a);
                 if (idx < sp) { result = floor(stack[idx]); }
-                else { result = 0.0; }
-            }
-            case OP_CEIL {
-                let idx = u32(instr.a);
-                if (idx < sp) { result = ceil(stack[idx]); }
-                else { result = 0.0; }
-            }
-            case OP_ROUND {
-                let idx = u32(instr.a);
-                if (idx < sp) { result = round(stack[idx]); }
                 else { result = 0.0; }
             }
             case OP_NEGATE {

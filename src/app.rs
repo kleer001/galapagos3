@@ -1,6 +1,6 @@
 use galapagos3::config;
 use galapagos3::evolution;
-use galapagos3::genome::{Genome, Node};
+use galapagos3::genome::{Genome, Node, OpCode};
 use galapagos3::renderer::GpuRenderer;
 use eframe::egui;
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
@@ -106,6 +106,17 @@ pub struct Individual {
     pub v_remap: Genome,
 }
 
+fn make_spatial_genome(rng: &mut impl Rng, max_depth: usize) -> Genome {
+    let mut candidate = Genome::new(Node::random_with_depth(rng, max_depth));
+    for _ in 0..9 {
+        if candidate.instructions.iter().any(|i| matches!(i.op, OpCode::X | OpCode::Y)) {
+            return candidate;
+        }
+        candidate = Genome::new(Node::random_with_depth(rng, max_depth));
+    }
+    candidate
+}
+
 fn make_palette_genome(rng: &mut impl Rng, max_depth: usize) -> Genome {
     let mut candidate = Genome::new(Node::random_palette_with_depth(rng, max_depth));
     for _ in 0..9 {
@@ -117,12 +128,69 @@ fn make_palette_genome(rng: &mut impl Rng, max_depth: usize) -> Genome {
     candidate
 }
 
+fn channel_stats(spatial: &Genome, remap: &Genome) -> (f32, f32) {
+    // Sample the full HSV channel pipeline (spatial → remap, both with fract) on a 5×5 grid.
+    // Returns (range, mean).
+    let coords: [f32; 5] = [-0.8, -0.4, 0.0, 0.4, 0.8];
+    let samples: Vec<f32> = coords.iter().flat_map(|&ny| {
+        coords.iter().map(move |&nx| {
+            let raw = (spatial.eval(nx, ny, 0.0).fract() + 1.0).fract();
+            (remap.eval(0.0, 0.0, raw).fract() + 1.0).fract()
+        })
+    }).collect();
+    let min = samples.iter().cloned().fold(f32::INFINITY, f32::min);
+    let max = samples.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let mean = samples.iter().sum::<f32>() / samples.len() as f32;
+    (max - min, mean)
+}
+
+fn render_viable(ind: &Individual) -> bool {
+    // Render at 64×36 (2304 pixels) for a reliable stdev estimate.
+    let pixels = ind.render_tile_cpu_at_size(64, 36);
+    let brightness: Vec<f32> = pixels.iter().map(|&p| {
+        let r = ((p >> 16) & 0xFF) as f32 / 255.0;
+        let g = ((p >>  8) & 0xFF) as f32 / 255.0;
+        let b = ( p        & 0xFF) as f32 / 255.0;
+        (r + g + b) / 3.0
+    }).collect();
+    let mean = brightness.iter().sum::<f32>() / brightness.len() as f32;
+    let stdev = (brightness.iter().map(|&v| (v - mean).powi(2)).sum::<f32>()
+        / brightness.len() as f32).sqrt();
+    let dark = brightness.iter().filter(|&&b| b < 0.02).count() as f32 / brightness.len() as f32;
+    mean >= config::MIN_CHANNEL_MEAN && stdev >= 0.02 && dark <= 0.7
+}
+
+fn channel_ok(spatial: &Genome, remap: &Genome) -> bool {
+    let (range, mean) = channel_stats(spatial, remap);
+    range >= config::MIN_CHANNEL_RANGE && mean >= config::MIN_CHANNEL_MEAN
+}
+
 impl Individual {
     pub fn random_with_depth(rng: &mut impl Rng, max_depth: usize) -> Self {
+        for _ in 0..10 {
+            let mut ind = Self {
+                h: make_spatial_genome(rng, max_depth),
+                s: make_spatial_genome(rng, max_depth),
+                v: make_spatial_genome(rng, max_depth),
+                h_remap: make_palette_genome(rng, max_depth),
+                s_remap: make_palette_genome(rng, max_depth),
+                v_remap: make_palette_genome(rng, max_depth),
+            };
+            for _ in 0..9 {
+                let h_ok = channel_ok(&ind.h, &ind.h_remap);
+                let s_ok = channel_ok(&ind.s, &ind.s_remap);
+                let v_ok = channel_ok(&ind.v, &ind.v_remap);
+                if h_ok && s_ok && v_ok { break; }
+                if !h_ok { ind.h = make_spatial_genome(rng, max_depth); ind.h_remap = make_palette_genome(rng, max_depth); }
+                if !s_ok { ind.s = make_spatial_genome(rng, max_depth); ind.s_remap = make_palette_genome(rng, max_depth); }
+                if !v_ok { ind.v = make_spatial_genome(rng, max_depth); ind.v_remap = make_palette_genome(rng, max_depth); }
+            }
+            if render_viable(&ind) { return ind; }
+        }
         Self {
-            h: Genome::new(Node::random_with_depth(rng, max_depth)),
-            s: Genome::new(Node::random_with_depth(rng, max_depth)),
-            v: Genome::new(Node::random_with_depth(rng, max_depth)),
+            h: make_spatial_genome(rng, max_depth),
+            s: make_spatial_genome(rng, max_depth),
+            v: make_spatial_genome(rng, max_depth),
             h_remap: make_palette_genome(rng, max_depth),
             s_remap: make_palette_genome(rng, max_depth),
             v_remap: make_palette_genome(rng, max_depth),
@@ -813,5 +881,58 @@ impl eframe::App for App {
                 self.hovered_tile = new_hovered;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod viability_tests {
+    use super::*;
+
+    fn pixel_stats(pixels: &[u32]) -> (f32, f32) {
+        let brightness: Vec<f32> = pixels.iter().map(|&p| {
+            let r = ((p >> 16) & 0xFF) as f32 / 255.0;
+            let g = ((p >>  8) & 0xFF) as f32 / 255.0;
+            let b = ( p        & 0xFF) as f32 / 255.0;
+            (r + g + b) / 3.0
+        }).collect();
+        let mean = brightness.iter().sum::<f32>() / brightness.len() as f32;
+        let stdev = (brightness.iter().map(|&v| (v - mean).powi(2)).sum::<f32>()
+            / brightness.len() as f32).sqrt();
+        (mean, stdev)
+    }
+
+    #[test]
+    fn check_generated_individuals() {
+        let mut rng = rand::thread_rng();
+        let mut failures = 0;
+        let n = 16;
+
+        for i in 0..n {
+            let ind = Individual::random_with_depth(&mut rng, config::MAX_TREE_DEPTH);
+            let pixels = ind.render_tile_cpu_at_size(64, 36);
+            let (mean, stdev) = pixel_stats(&pixels);
+
+            let black  = mean  < 0.05;
+            let solid  = stdev < 0.02;
+
+            if black || solid {
+                failures += 1;
+                println!("\nFAIL tile {} — mean={:.3} stdev={:.3} {}{}",
+                    i, mean, stdev,
+                    if black { "[BLACK] " } else { "" },
+                    if solid { "[SOLID]" } else { "" });
+                println!("  H:       {}", ind.h.to_expr_string());
+                println!("  S:       {}", ind.s.to_expr_string());
+                println!("  V:       {}", ind.v.to_expr_string());
+                println!("  H_remap: {}", ind.h_remap.to_expr_string());
+                println!("  S_remap: {}", ind.s_remap.to_expr_string());
+                println!("  V_remap: {}", ind.v_remap.to_expr_string());
+            } else {
+                println!("ok  tile {} — mean={:.3} stdev={:.3}", i, mean, stdev);
+            }
+        }
+
+        println!("\n=== {} / {} failed ===", failures, n);
+        assert_eq!(failures, 0, "{} tiles were black or solid", failures);
     }
 }
