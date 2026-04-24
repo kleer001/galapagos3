@@ -1,6 +1,6 @@
 use crate::config;
 use crate::genome::linear::OpCode;
-use crate::genome::op::{op_def, Arity, EvalFn, OP_REGISTRY};
+use crate::genome::op::{op_def, weighted_choice, Arity, EvalFn, OP_REGISTRY};
 use rand::Rng;
 
 #[derive(Clone, Debug)]
@@ -41,7 +41,16 @@ impl Node {
     }
 
     fn random_terminal(rng: &mut impl Rng) -> Self {
-        if rng.gen_bool(0.5) { Node::terminal(OpCode::X) } else { Node::terminal(OpCode::Y) }
+        match rng.gen_range(0..5) {
+            0 | 1 => Node::terminal(OpCode::X),
+            2 | 3 => Node::terminal(OpCode::Y),
+            _ => {
+                let op = if rng.gen_bool(0.5) { OpCode::ScaledX } else { OpCode::ScaledY };
+                let mut n = Node::terminal(op);
+                n.value = 10_f32.powf(rng.gen_range(-1.0_f32..=1.0_f32));
+                n
+            }
+        }
     }
 
     fn random_bounded(rng: &mut impl Rng, max_depth: usize, max_size: usize, min_depth: usize) -> Self {
@@ -68,11 +77,17 @@ impl Node {
                 true
             })
             .collect();
-        let def = eligible[rng.gen_range(0..eligible.len())];
+        let def = weighted_choice(&eligible, rng);
         let next_min = min_depth.saturating_sub(1);
 
         match def.arity {
-            Arity::Nullary => Node::terminal(def.opcode),
+            Arity::Nullary => {
+                let mut node = Node::terminal(def.opcode);
+                if matches!(def.opcode, OpCode::ScaledX | OpCode::ScaledY) {
+                    node.value = 10_f32.powf(rng.gen_range(-1.0_f32..=1.0_f32));
+                }
+                node
+            }
             Arity::Unary => {
                 let child = Self::random_bounded(rng, max_depth - 1, max_size - 1, next_min);
                 Node::unary(def.opcode, child)
@@ -81,7 +96,7 @@ impl Node {
                 let budget = (max_size - 1) / 2;
                 let a = Self::random_bounded(rng, max_depth - 1, budget, next_min);
                 let b = Self::random_bounded(rng, max_depth - 1, budget, next_min);
-                if def.opcode == OpCode::FBM {
+                if matches!(def.opcode, OpCode::FBM | OpCode::Turbulence | OpCode::Ridged | OpCode::Billow | OpCode::DomainWarp) {
                     let mut node = Node::binary(def.opcode, a, b);
                     node.c_literal = rng.gen_range(1..=6);
                     return node;
@@ -158,7 +173,7 @@ impl Node {
         // While min_depth > 0, also exclude Nullary ops so the tree must keep branching.
         let eligible: Vec<&crate::genome::op::OpDef> = OP_REGISTRY.iter()
             .filter(|def| {
-                if matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::MirrorX | OpCode::MirrorY | OpCode::Const | OpCode::PaletteT) {
+                if matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::MirrorX | OpCode::MirrorY | OpCode::ScaledX | OpCode::ScaledY | OpCode::Const | OpCode::PaletteT) {
                     return false;
                 }
                 if min_depth > 0 && def.arity == Arity::Nullary {
@@ -167,7 +182,7 @@ impl Node {
                 true
             })
             .collect();
-        let def = eligible[rng.gen_range(0..eligible.len())];
+        let def = weighted_choice(&eligible, rng);
         let next_min = min_depth.saturating_sub(1);
 
         match def.arity {
@@ -180,7 +195,7 @@ impl Node {
                 let budget = (max_size - 1) / 2;
                 let a = Self::random_palette_bounded(rng, max_depth - 1, budget, next_min);
                 let b = Self::random_palette_bounded(rng, max_depth - 1, budget, next_min);
-                if def.opcode == OpCode::FBM {
+                if matches!(def.opcode, OpCode::FBM | OpCode::Turbulence | OpCode::Ridged | OpCode::Billow | OpCode::DomainWarp) {
                     let mut node = Node::binary(def.opcode, a, b);
                     node.c_literal = rng.gen_range(1..=6);
                     return node;

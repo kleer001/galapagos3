@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Node Display Tester</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: #f4f1ec; color: #282420; display: flex; height: 100vh; overflow: hidden; }
+
+/* ── Controls panel ── */
+#controls {
+  width: 300px; flex-shrink: 0; background: #fff; border-right: 1px solid #d8d4cc;
+  overflow-y: auto; padding: 1.25rem;
+}
+#controls h1 { font-size: 1rem; font-weight: 700; margin-bottom: 0.3rem; color: #3d3a36; }
+#controls p  { font-size: 0.73rem; color: #8a8680; margin-bottom: 1.25rem; line-height: 1.5; }
+.group { margin-bottom: 1.25rem; border-top: 1px solid #e8e4dc; padding-top: 0.9rem; }
+.group:first-of-type { border-top: none; padding-top: 0; }
+.group-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #8a8680; margin-bottom: 0.6rem; }
+.row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.45rem; gap: 0.5rem; }
+.row label { font-size: 0.78rem; flex: 1; white-space: nowrap; font-family: monospace; color: #3d3a36; }
+.row .val   { font-size: 0.72rem; color: #8a8680; min-width: 3rem; text-align: right; font-family: monospace; }
+input[type=range] { width: 100px; accent-color: #3d3a36; }
+input[type=color] { width: 34px; height: 22px; border: 1px solid #d8d4cc; border-radius: 3px; cursor: pointer; padding: 1px; background: none; }
+input[type=checkbox] { width: 14px; height: 14px; accent-color: #3d3a36; cursor: pointer; }
+
+/* ── Code output ── */
+#output {
+  background: #1a1714; color: #d4f0a4; font-family: monospace; font-size: 0.69rem;
+  padding: 0.75rem; border-radius: 5px; margin-top: 0.5rem; white-space: pre; line-height: 1.75;
+  cursor: text; user-select: all;
+}
+#copy-btn {
+  width: 100%; margin-top: 0.4rem; padding: 0.35rem; font-size: 0.73rem; cursor: pointer;
+  background: #3d3a36; color: #f4f1ec; border: none; border-radius: 4px;
+}
+#copy-btn:hover { background: #575350; }
+
+/* ── Preview pane ── */
+#preview {
+  flex: 1; overflow-y: auto; padding: 2rem 2rem 3rem;
+  display: flex; flex-direction: column; gap: 2.5rem;
+}
+.preview-group-label {
+  font-size: 0.69rem; text-transform: uppercase; letter-spacing: 0.09em;
+  color: #8a8680; margin-bottom: 0.6rem;
+}
+.preview-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.preview-panel { display: flex; flex-direction: column; }
+.preview-panel-label {
+  font-size: 0.69rem; color: #8a8680; margin-bottom: 0.35rem;
+  font-family: monospace;
+}
+
+/*
+  Exact sizes used in genome-explainer.html:
+  Evo panels  → .evo-svg-wrap  { height: 180px }  panel min-width: 200px
+  Demo panels → .demo-svg-wrap { height: 160px }  panel min-width: 150px
+  We use fixed widths that match a typical 3-panel layout at 960px page width.
+*/
+.wrap-evo  { width: 260px; height: 180px; background: #fff; border: 1px solid #d8d4cc; border-radius: 8px; overflow: hidden; }
+.wrap-demo { width: 200px; height: 160px; background: #fff; border: 1px solid #d8d4cc; border-radius: 6px; overflow: hidden; }
+.wrap-evo svg, .wrap-demo svg { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <h1>Node Display Tester</h1>
+  <p>Defaults are exact STYLE values from genome-explainer.html. Change values here, copy the block at the bottom, paste into STYLE.</p>
+
+  <div class="group">
+    <div class="group-title">Layout</div>
+    <div class="row"><label>nodeR</label>
+      <input type="range" id="nodeR" min="8" max="50" value="24" oninput="update()">
+      <span class="val" id="v-nodeR">24</span></div>
+    <div class="row"><label>leafW</label>
+      <input type="range" id="leafW" min="20" max="120" value="56" oninput="update()">
+      <span class="val" id="v-leafW">56</span></div>
+    <div class="row"><label>levelH</label>
+      <input type="range" id="levelH" min="30" max="150" value="70" oninput="update()">
+      <span class="val" id="v-levelH">70</span></div>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Edges</div>
+    <div class="row"><label>edgeColor</label>
+      <input type="color" id="edgeColor" value="#c0bbb0" oninput="update()"></div>
+    <div class="row"><label>edgeWidth</label>
+      <input type="range" id="edgeWidth" min="1" max="10" value="2" oninput="update()">
+      <span class="val" id="v-edgeWidth">2</span></div>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Node rings</div>
+    <div class="row"><label>nodeStroke</label>
+      <input type="color" id="nodeStroke" value="#1a1714" oninput="update()"></div>
+    <!-- hiStrokeW stored ×10 to allow one decimal place -->
+    <div class="row"><label>hiStrokeW</label>
+      <input type="range" id="hiStrokeW" min="1" max="50" value="25" oninput="update()">
+      <span class="val" id="v-hiStrokeW">2.5</span></div>
+    <div class="row"><label>dimStrokeW</label>
+      <input type="range" id="dimStrokeW" min="1" max="50" value="15" oninput="update()">
+      <span class="val" id="v-dimStrokeW">1.5</span></div>
+    <!-- dimAlpha stored 0-255, matching the 2-char hex string in STYLE -->
+    <div class="row"><label>dimAlpha (0–255)</label>
+      <input type="range" id="dimAlpha" min="0" max="255" value="34" oninput="update()">
+      <span class="val" id="v-dimAlpha">'22'</span></div>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Node colors</div>
+    <div class="row"><label>evoA</label>
+      <input type="color" id="evoA" value="#1a5c8c" oninput="update()"></div>
+    <div class="row"><label>evoB</label>
+      <input type="color" id="evoB" value="#a02020" oninput="update()"></div>
+    <div class="row"><label>colorMut</label>
+      <input type="color" id="colorMut" value="#e07830" oninput="update()"></div>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Text</div>
+    <!-- fontSize: 0 = auto (10/13/16 by label length) -->
+    <div class="row"><label>fontSize (0=auto)</label>
+      <input type="range" id="fontSize" min="0" max="28" value="0" oninput="update()">
+      <span class="val" id="v-fontSize">auto</span></div>
+    <!-- textColor: checkbox enables picker; unchecked = null (derive from stroke) -->
+    <div class="row"><label>textColor override</label>
+      <input type="checkbox" id="useTextColor" oninput="update()"></div>
+    <div class="row"><label>textColor</label>
+      <input type="color" id="textColor" value="#1a1714" oninput="update()" disabled></div>
+    <div class="row"><label>textOutline</label>
+      <input type="checkbox" id="textOutline" oninput="update()"></div>
+    <div class="row"><label>outlineColor</label>
+      <input type="color" id="outlineColor" value="#ffffff" oninput="update()"></div>
+    <div class="row"><label>outlineWidth</label>
+      <input type="range" id="outlineWidth" min="1" max="12" value="1" oninput="update()">
+      <span class="val" id="v-outlineWidth">1</span></div>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Export — paste into STYLE</div>
+    <div id="output"></div>
+    <button id="copy-btn" onclick="copyOut()">Copy to clipboard</button>
+  </div>
+</div>
+
+<div id="preview">
+
+  <div>
+    <div class="preview-group-label">
+      Evo panels — 260 × 180 px (matches interactive Parents / Child panels)
+    </div>
+    <div class="preview-row">
+      <div class="preview-panel">
+        <div class="preview-panel-label">Parent A — all evoA highlighted</div>
+        <div class="wrap-evo"><svg id="p-evo-a" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="preview-panel">
+        <div class="preview-panel-label">Parent B — all evoB highlighted</div>
+        <div class="wrap-evo"><svg id="p-evo-b" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="preview-panel">
+        <div class="preview-panel-label">Child — evoA trunk, evoB subtree</div>
+        <div class="wrap-evo"><svg id="p-evo-child" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="preview-group-label">
+      Demo panels — 200 × 160 px (matches static mutation Before / After panels)
+    </div>
+    <div class="preview-row">
+      <div class="preview-panel">
+        <div class="preview-panel-label">Before — target subtree dimmed</div>
+        <div class="wrap-demo"><svg id="p-demo-before" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="preview-panel">
+        <div class="preview-panel-label">After — expression mutate (colorMut nodes)</div>
+        <div class="wrap-demo"><svg id="p-demo-expr" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="preview-panel">
+        <div class="preview-panel-label">After — duplicate (evoB dest, colorMut copy)</div>
+        <div class="wrap-demo"><svg id="p-demo-dup" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Fixed 9-node tree ─────────────────────────────────────────────────────────
+// Topology: root → [left, right], left → [ll, lm, lr], right → [rl, rm, rr]
+// Labels chosen for representative font-size coverage:
+//   1-char (fs 16): x, y, +, ×
+//   3-char (fs 13): sin, mod, abs
+//   5-char (fs 10): fract
+
+let _id = 0;
+function node(label, children = []) {
+  return { label, children, id: _id++, _x: 0, _y: 0 };
+}
+
+function makeTree() {
+  _id = 0;
+  return node('sin', [                   // id 0 — root (3-char, fs 13)
+    node('mod', [                        // id 1 — left branch (3-char, fs 13)
+      node('x'),                         // id 2 — ll (1-char, fs 16)
+      node('fract'),                     // id 3 — lm (5-char, fs 10)
+      node('abs'),                       // id 4 — lr (3-char, fs 13)
+    ]),
+    node('×', [                          // id 5 — right branch (1-char, fs 16)
+      node('y'),                         // id 6 — rl (1-char, fs 16)
+      node('+'),                         // id 7 — rm (1-char, fs 16)
+      node('1.4'),                       // id 8 — rr (3-char, fs 13) — typical const
+    ]),
+  ]);
+}
+
+// ── Rendering (exact copies from genome-explainer.html) ──────────────────────
+
+function computeLayout(root, s) {
+  let leaf = 0;
+  function lay(n, depth) {
+    if (n.children.length === 0) {
+      n._x = leaf * s.leafW; n._y = depth * s.levelH; leaf++;
+    } else {
+      n.children.forEach(c => lay(c, depth + 1));
+      const xs = n.children.map(c => c._x);
+      n._x = (Math.min(...xs) + Math.max(...xs)) / 2;
+      n._y = depth * s.levelH;
+    }
+  }
+  lay(root, 0);
+}
+
+function allNodes(root) {
+  const q = [root], out = [];
+  while (q.length) { const n = q.shift(); out.push(n); n.children.forEach(c => q.push(c)); }
+  return out;
+}
+
+function renderSVG(svgEl, root, highlightIds, nodeColorFn, s) {
+  // Reset layout positions each render (leafW/levelH may have changed)
+  computeLayout(root, s);
+
+  const nodes = allNodes(root);
+  const edges = [];
+  function collectEdges(n) { n.children.forEach(c => { edges.push({from:n,to:c}); collectEdges(c); }); }
+  collectEdges(root);
+
+  const xs = nodes.map(n => n._x), ys = nodes.map(n => n._y);
+  const pad = s.nodeR + 8;
+  const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
+  const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
+  svgEl.setAttribute('viewBox', `${minX} ${minY} ${maxX - minX} ${maxY - minY}`);
+
+  let h = '';
+  for (const e of edges)
+    h += `<line x1="${e.from._x}" y1="${e.from._y}" x2="${e.to._x}" y2="${e.to._y}" stroke="${s.edgeColor}" stroke-width="${s.edgeWidth}"/>`;
+
+  for (const n of nodes) {
+    const col    = nodeColorFn(n);
+    const hi     = highlightIds.has(n.id);
+    const fill   = hi ? col : col + s.dimAlpha;
+    const stroke = hi ? s.nodeStroke : col;
+    const sw     = hi ? s.hiStrokeW  : s.dimStrokeW;
+    const lbl    = n.label;
+    const fs     = s.fontSize > 0 ? s.fontSize : (lbl.length > 4 ? 10 : lbl.length > 2 ? 13 : 16);
+    const r      = s.nodeR;
+    h += `<circle cx="${n._x}" cy="${n._y}" r="${r}" fill="#ffffff" stroke="none"/>`;
+    h += `<circle cx="${n._x}" cy="${n._y}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    const tFill   = s.textColor ?? (s.textOutline ? '#000000' : stroke);
+    const tStroke = s.textOutline
+      ? ` stroke="${s.outlineColor}" stroke-width="${s.outlineWidth}" paint-order="stroke"` : '';
+    h += `<text x="${n._x}" y="${n._y + fs*0.38}" text-anchor="middle" font-size="${fs}" fill="${tFill}"${tStroke} font-family="monospace" font-weight="600">${lbl}</text>`;
+  }
+  svgEl.innerHTML = h;
+}
+
+// ── Controls → config ─────────────────────────────────────────────────────────
+
+function getS() {
+  const dimRaw       = parseInt(document.getElementById('dimAlpha').value);
+  const useTextColor = document.getElementById('useTextColor').checked;
+  const fontSizeRaw  = parseInt(document.getElementById('fontSize').value);
+  // Enable/disable color picker based on checkbox
+  document.getElementById('textColor').disabled = !useTextColor;
+  return {
+    nodeR:       parseInt(document.getElementById('nodeR').value),
+    leafW:       parseInt(document.getElementById('leafW').value),
+    levelH:      parseInt(document.getElementById('levelH').value),
+    edgeColor:   document.getElementById('edgeColor').value,
+    edgeWidth:   parseInt(document.getElementById('edgeWidth').value),
+    nodeStroke:  document.getElementById('nodeStroke').value,
+    hiStrokeW:   parseInt(document.getElementById('hiStrokeW').value) / 10,
+    dimStrokeW:  parseInt(document.getElementById('dimStrokeW').value) / 10,
+    dimAlpha:    dimRaw.toString(16).padStart(2, '0'),
+    evoA:        document.getElementById('evoA').value,
+    evoB:        document.getElementById('evoB').value,
+    colorMut:    document.getElementById('colorMut').value,
+    fontSize:    fontSizeRaw,   // 0 = auto
+    textColor:   useTextColor ? document.getElementById('textColor').value : null,
+    textOutline: document.getElementById('textOutline').checked,
+    outlineColor:document.getElementById('outlineColor').value,
+    outlineWidth:parseInt(document.getElementById('outlineWidth').value),
+  };
+}
+
+function update() {
+  const s = getS();
+
+  // Update display values
+  document.getElementById('v-nodeR').textContent      = s.nodeR;
+  document.getElementById('v-leafW').textContent      = s.leafW;
+  document.getElementById('v-levelH').textContent     = s.levelH;
+  document.getElementById('v-edgeWidth').textContent  = s.edgeWidth;
+  document.getElementById('v-hiStrokeW').textContent  = s.hiStrokeW.toFixed(1);
+  document.getElementById('v-dimStrokeW').textContent = s.dimStrokeW.toFixed(1);
+  document.getElementById('v-dimAlpha').textContent   = `'${s.dimAlpha}'`;
+  document.getElementById('v-outlineWidth').textContent = s.outlineWidth;
+  document.getElementById('v-fontSize').textContent = s.fontSize > 0 ? s.fontSize : 'auto';
+
+  const tree = makeTree();
+  const allHi = new Set(allNodes(tree).map(n => n.id));
+
+  // Right subtree IDs (ids 5-8): used to simulate B-origin in child panel
+  const bIds = new Set([5, 6, 7, 8]);
+  // Left-leaf IDs (2-4): dimmed in "before" panel
+  const dimIds = new Set([2, 3, 4]);
+  // colorMut IDs for expression-mutate demo
+  const mutIds = new Set([0, 3, 7]);
+  // evoB destination IDs for duplicate demo
+  const dstIds = new Set([5, 6, 7, 8]);
+
+  // Evo panels
+  renderSVG(document.getElementById('p-evo-a'), makeTree(), allHi, () => s.evoA, s);
+  renderSVG(document.getElementById('p-evo-b'), makeTree(), allHi, () => s.evoB, s);
+
+  const childTree = makeTree();
+  renderSVG(document.getElementById('p-evo-child'), childTree, allHi,
+    n => bIds.has(n.id) ? s.evoB : s.evoA, s);
+
+  // Demo panels
+  const beforeTree = makeTree();
+  const beforeHi   = new Set(allNodes(beforeTree).map(n => n.id).filter(id => !dimIds.has(id)));
+  renderSVG(document.getElementById('p-demo-before'), beforeTree, beforeHi, () => s.evoA, s);
+
+  renderSVG(document.getElementById('p-demo-expr'), makeTree(), allHi,
+    n => mutIds.has(n.id) ? s.colorMut : s.evoA, s);
+
+  renderSVG(document.getElementById('p-demo-dup'), makeTree(), allHi,
+    n => dstIds.has(n.id) ? s.colorMut : s.evoA, s);
+
+  // Export block — formatted to paste directly into STYLE
+  document.getElementById('output').textContent =
+`  nodeR:       ${s.nodeR},
+  leafW:       ${s.leafW},
+  levelH:      ${s.levelH},
+  edgeColor:   '${s.edgeColor}',
+  edgeWidth:   ${s.edgeWidth},
+  nodeStroke:  '${s.nodeStroke}',
+  hiStrokeW:   ${s.hiStrokeW.toFixed(1)},
+  dimStrokeW:  ${s.dimStrokeW.toFixed(1)},
+  dimAlpha:    '${s.dimAlpha}',
+  evoA:        '${s.evoA}',
+  evoB:        '${s.evoB}',
+  colorMut:    '${s.colorMut}',
+  fontSize:    ${s.fontSize > 0 ? s.fontSize : 0},
+  textColor:   ${s.textColor !== null ? `'${s.textColor}'` : 'null'},
+  textOutline: ${s.textOutline},
+  outlineColor:'${s.outlineColor}',
+  outlineWidth:${s.outlineWidth},`;
+}
+
+function copyOut() {
+  navigator.clipboard.writeText(document.getElementById('output').textContent)
+    .then(() => {
+      const b = document.getElementById('copy-btn');
+      b.textContent = 'Copied!';
+      setTimeout(() => b.textContent = 'Copy to clipboard', 1500);
+    });
+}
+
+update();
+</script>
+</body>
+</html>

@@ -88,7 +88,9 @@ pub struct OutputInfo {
     pub tile_h: u32,
     pub jitter_x: f32,
     pub jitter_y: f32,
-    pub _pad: [f32; 2],
+    /// Color-space id (see config::NUM_COLOR_MODELS). The shader dispatches on this.
+    pub color_model: u32,
+    pub _pad: u32,
 }
 
 // ============================================================================
@@ -260,6 +262,7 @@ impl GpuRenderer {
         h_remap: &Genome,
         s_remap: &Genome,
         v_remap: &Genome,
+        color_model: u32,
     ) -> RenderResult<Vec<u32>> {
         let output_w = config::TILE_W;
         let output_h = config::TILE_H;
@@ -273,7 +276,7 @@ impl GpuRenderer {
         let sr_instr = Self::instructions_to_gpu(&s_remap.instructions);
         let vr_instr = Self::instructions_to_gpu(&v_remap.instructions);
 
-        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h, 0.0, 0.0).await
+        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h, 0.0, 0.0, color_model).await
     }
 
     /// Render a single tile at a specified output size with optional SSAA.
@@ -289,6 +292,7 @@ impl GpuRenderer {
         output_w: u32,
         output_h: u32,
         ssaa_factor: u32,
+        color_model: u32,
     ) -> RenderResult<Vec<u32>> {
         let (render_w, render_h) = (output_w * ssaa_factor, output_h * ssaa_factor);
         let h_instr = instructions_to_gpu_raw(h_raw);
@@ -299,7 +303,7 @@ impl GpuRenderer {
         let vr_instr = instructions_to_gpu_raw(vr_raw);
         self.render_from_gpu_instructions(
             h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
-            render_w, render_h, output_w, output_h, 0.0, 0.0,
+            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model,
         ).await
     }
 
@@ -312,8 +316,9 @@ impl GpuRenderer {
         hr_raw: &[(u32, i32, i32, i32, f32)],
         sr_raw: &[(u32, i32, i32, i32, f32)],
         vr_raw: &[(u32, i32, i32, i32, f32)],
+        color_model: u32,
     ) -> RenderResult<Vec<u32>> {
-        self.render_tile_at_size(h_raw, s_raw, v_raw, hr_raw, sr_raw, vr_raw, config::TILE_W, config::TILE_H, config::SUPERSAMPLE_FACTOR).await
+        self.render_tile_at_size(h_raw, s_raw, v_raw, hr_raw, sr_raw, vr_raw, config::TILE_W, config::TILE_H, config::SUPERSAMPLE_FACTOR, color_model).await
     }
 
     /// Internal: render from already-converted GPU instructions with supersampling.
@@ -332,6 +337,7 @@ impl GpuRenderer {
         output_h: u32,
         jitter_x: f32,
         jitter_y: f32,
+        color_model: u32,
     ) -> RenderResult<Vec<u32>> {
         let render_size = (render_w * render_h) as usize;
         let output_size = (output_w * output_h) as usize;
@@ -357,7 +363,7 @@ impl GpuRenderer {
         // Create output info buffer (render resolution + jitter for shader)
         let output_info = OutputInfo {
             width: render_w, height: render_h, tile_w: render_w, tile_h: render_h,
-            jitter_x, jitter_y, _pad: [0.0; 2],
+            jitter_x, jitter_y, color_model, _pad: 0,
         };
         let info_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output Info Buffer"),
@@ -508,6 +514,7 @@ impl GpuRenderer {
         output_h: u32,
         ssaa_factor: u32,
         num_samples: u32,
+        color_model: u32,
     ) -> RenderResult<Vec<u32>> {
         let render_w = output_w * ssaa_factor;
         let render_h = output_h * ssaa_factor;
@@ -533,7 +540,7 @@ impl GpuRenderer {
 
             let pixels = self.render_from_gpu_instructions(
                 h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
-                render_w, render_h, output_w, output_h, jx, jy,
+                render_w, render_h, output_w, output_h, jx, jy, color_model,
             ).await?;
 
             for (i, &p) in pixels.iter().enumerate() {

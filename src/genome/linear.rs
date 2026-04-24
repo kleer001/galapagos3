@@ -52,6 +52,14 @@ pub enum OpCode {
     Manhattan = 42,
     SinFold = 43,
     PaletteT = 44,
+    // Noise variants
+    Turbulence = 45,
+    Ridged = 46,
+    Billow = 47,
+    SimplexNoise = 48,
+    DomainWarp = 49,
+    ScaledX = 50,
+    ScaledY = 51,
 }
 
 #[derive(Debug, Clone, Copy)]

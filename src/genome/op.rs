@@ -1,3 +1,4 @@
+use rand::Rng;
 use super::linear::OpCode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,7 @@ pub struct OpDef {
     pub name: &'static str,
     pub arity: Arity,
     pub eval: EvalFn,
+    pub weight: f32,
 }
 
 // ============================================================================
@@ -90,6 +92,85 @@ fn eval_triwave(v: f32) -> f32 { ((v * 0.5).fract() * 2.0 - 1.0).abs() }
 fn eval_chebyshev(a: f32, b: f32) -> f32 { a.abs().max(b.abs()) }
 fn eval_manhattan(a: f32, b: f32) -> f32 { a.abs() + b.abs() }
 fn eval_sinfold(v: f32) -> f32 { (v * std::f32::consts::PI).sin() }
+
+fn eval_scaled_x(x: f32, _y: f32, scale: f32) -> f32 { x * scale }
+fn eval_scaled_y(_x: f32, y: f32, scale: f32) -> f32 { y * scale }
+
+fn eval_turbulence(vx: f32, vy: f32, octaves: i32) -> f32 {
+    let mut value = 0.0f32;
+    let mut amplitude = 1.0f32;
+    let mut frequency = 1.0f32;
+    let mut max_val = 0.0f32;
+    for _ in 0..octaves.clamp(1, 8) {
+        let n = eval_value_noise(vx * frequency, vy * frequency);
+        value += (n * 2.0 - 1.0).abs() * amplitude;
+        max_val += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    if max_val > 0.0 { value / max_val } else { 0.0 }
+}
+
+fn eval_ridged(vx: f32, vy: f32, octaves: i32) -> f32 {
+    let mut value = 0.0f32;
+    let mut amplitude = 1.0f32;
+    let mut frequency = 1.0f32;
+    let mut max_val = 0.0f32;
+    for _ in 0..octaves.clamp(1, 8) {
+        let n = eval_value_noise(vx * frequency, vy * frequency);
+        value += (1.0 - (n * 2.0 - 1.0).abs()) * amplitude;
+        max_val += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    if max_val > 0.0 { value / max_val } else { 0.0 }
+}
+
+fn eval_billow(vx: f32, vy: f32, octaves: i32) -> f32 {
+    let mut value = 0.0f32;
+    let mut amplitude = 1.0f32;
+    let mut frequency = 1.0f32;
+    let mut max_val = 0.0f32;
+    for _ in 0..octaves.clamp(1, 8) {
+        let n = eval_value_noise(vx * frequency, vy * frequency);
+        value += (n.abs() * 2.0 - 1.0) * amplitude;
+        max_val += amplitude;
+        amplitude *= 0.5;
+        frequency *= 2.0;
+    }
+    if max_val > 0.0 { value / max_val } else { 0.0 }
+}
+
+fn eval_simplex_noise(vx: f32, vy: f32) -> f32 {
+    const F2: f32 = 0.366025404;
+    const G2: f32 = 0.211324865;
+    let s = (vx + vy) * F2;
+    let i = (vx + s).floor();
+    let j = (vy + s).floor();
+    let t = (i + j) * G2;
+    let x0 = vx - i + t;
+    let y0 = vy - j + t;
+    let (i1, j1) = if x0 > y0 { (1.0f32, 0.0f32) } else { (0.0f32, 1.0f32) };
+    let x1 = x0 - i1 + G2;
+    let y1 = y0 - j1 + G2;
+    let x2 = x0 - 1.0 + 2.0 * G2;
+    let y2 = y0 - 1.0 + 2.0 * G2;
+    let corner = |ix: f32, iy: f32, dx: f32, dy: f32| -> f32 {
+        let tc = 0.5 - dx * dx - dy * dy;
+        if tc < 0.0 { return 0.0; }
+        let h = ((ix * 127.1 + iy * 311.3).sin() * 43758.5453).fract();
+        let angle = h * std::f32::consts::TAU;
+        tc * tc * tc * tc * (angle.cos() * dx + angle.sin() * dy)
+    };
+    let v = 70.0 * (corner(i, j, x0, y0) + corner(i + i1, j + j1, x1, y1) + corner(i + 1.0, j + 1.0, x2, y2));
+    (v.clamp(-1.0, 1.0) + 1.0) * 0.5
+}
+
+fn eval_domain_warp(vx: f32, vy: f32, octaves: i32) -> f32 {
+    let wx = eval_value_noise(vx, vy);
+    let wy = eval_value_noise(vy, vx);
+    eval_fbm(vx + wx, vy + wy, octaves)
+}
 
 fn eval_worley(vx: f32, vy: f32) -> f32 {
     let xi = vx.floor();
@@ -160,59 +241,78 @@ fn eval_fbm(vx: f32, vy: f32, octaves: i32) -> f32 {
 // To disable an op: comment out or remove its line.
 // ============================================================================
 
-pub static OP_REGISTRY: [OpDef; 45] = [
+pub static OP_REGISTRY: [OpDef; 52] = [
     // Phase 1: Core
-    OpDef { opcode: OpCode::X,          name: "X",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_x) },
-    OpDef { opcode: OpCode::Y,          name: "Y",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_y) },
-    OpDef { opcode: OpCode::Const,      name: "Const",      arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_const) },
-    OpDef { opcode: OpCode::Sin,        name: "Sin",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::sin) },
-    OpDef { opcode: OpCode::Cos,        name: "Cos",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::cos) },
-    OpDef { opcode: OpCode::Tan,        name: "Tan",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_tan) },
-    OpDef { opcode: OpCode::Abs,        name: "Abs",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::abs) },
-    OpDef { opcode: OpCode::Sqrt,       name: "Sqrt",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_sqrt) },
-    OpDef { opcode: OpCode::Log,        name: "Log",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_log) },
-    OpDef { opcode: OpCode::Exp,        name: "Exp",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_exp) },
-    OpDef { opcode: OpCode::Fract,      name: "Fract",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::fract) },
-    OpDef { opcode: OpCode::Add,        name: "Add",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_add) },
-    OpDef { opcode: OpCode::Sub,        name: "Sub",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_sub) },
-    OpDef { opcode: OpCode::Mul,        name: "Mul",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_mul) },
-    OpDef { opcode: OpCode::Div,        name: "Div",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_div) },
-    OpDef { opcode: OpCode::Pow,        name: "Pow",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_pow) },
-    OpDef { opcode: OpCode::Mix,        name: "Mix",        arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_mix) },
-    OpDef { opcode: OpCode::Smoothstep, name: "Smoothstep", arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_smoothstep) },
+    OpDef { opcode: OpCode::X,          name: "X",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_x),              weight: 1.0 },
+    OpDef { opcode: OpCode::Y,          name: "Y",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_y),              weight: 1.0 },
+    OpDef { opcode: OpCode::Const,      name: "Const",      arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_const),          weight: 1.0 },
+    OpDef { opcode: OpCode::Sin,        name: "Sin",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::sin),              weight: 1.0 },
+    OpDef { opcode: OpCode::Cos,        name: "Cos",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::cos),              weight: 1.0 },
+    OpDef { opcode: OpCode::Tan,        name: "Tan",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_tan),              weight: 1.0 },
+    OpDef { opcode: OpCode::Abs,        name: "Abs",        arity: Arity::Unary,    eval: EvalFn::Unary(f32::abs),              weight: 1.0 },
+    OpDef { opcode: OpCode::Sqrt,       name: "Sqrt",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_sqrt),             weight: 1.0 },
+    OpDef { opcode: OpCode::Log,        name: "Log",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_log),              weight: 1.0 },
+    OpDef { opcode: OpCode::Exp,        name: "Exp",        arity: Arity::Unary,    eval: EvalFn::Unary(eval_exp),              weight: 0.5 },
+    OpDef { opcode: OpCode::Fract,      name: "Fract",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::fract),            weight: 1.0 },
+    OpDef { opcode: OpCode::Add,        name: "Add",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_add),             weight: 1.0 },
+    OpDef { opcode: OpCode::Sub,        name: "Sub",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_sub),             weight: 1.0 },
+    OpDef { opcode: OpCode::Mul,        name: "Mul",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_mul),             weight: 1.0 },
+    OpDef { opcode: OpCode::Div,        name: "Div",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_div),             weight: 0.5 },
+    OpDef { opcode: OpCode::Pow,        name: "Pow",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_pow),             weight: 0.5 },
+    OpDef { opcode: OpCode::Mix,        name: "Mix",        arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_mix),            weight: 1.0 },
+    OpDef { opcode: OpCode::Smoothstep, name: "Smoothstep", arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_smoothstep),     weight: 1.0 },
     // Phase 2: Extended math
-    OpDef { opcode: OpCode::Acos,       name: "Acos",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_acos) },
-    OpDef { opcode: OpCode::Asin,       name: "Asin",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_asin) },
-    OpDef { opcode: OpCode::Atan,       name: "Atan",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::atan) },
-    OpDef { opcode: OpCode::Sinh,       name: "Sinh",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::sinh) },
-    OpDef { opcode: OpCode::Cosh,       name: "Cosh",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::cosh) },
-    OpDef { opcode: OpCode::Tanh,       name: "Tanh",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::tanh) },
-    OpDef { opcode: OpCode::Min,        name: "Min",        arity: Arity::Binary,   eval: EvalFn::Binary(f32::min) },
-    OpDef { opcode: OpCode::Max,        name: "Max",        arity: Arity::Binary,   eval: EvalFn::Binary(f32::max) },
-    OpDef { opcode: OpCode::Clamp,      name: "Clamp",      arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_clamp) },
-    OpDef { opcode: OpCode::Sign,       name: "Sign",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_sign) },
-    OpDef { opcode: OpCode::Floor,      name: "Floor",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::floor) },
-    OpDef { opcode: OpCode::Negate,     name: "Negate",     arity: Arity::Unary,    eval: EvalFn::Unary(eval_negate) },
-    OpDef { opcode: OpCode::Step,       name: "Step",       arity: Arity::Binary,   eval: EvalFn::Binary(eval_step) },
-    OpDef { opcode: OpCode::Reciprocal, name: "Reciprocal", arity: Arity::Unary,    eval: EvalFn::Unary(eval_reciprocal) },
-    OpDef { opcode: OpCode::Invert,     name: "Invert",     arity: Arity::Unary,    eval: EvalFn::Unary(eval_invert) },
+    OpDef { opcode: OpCode::Acos,       name: "Acos",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_acos),             weight: 1.0 },
+    OpDef { opcode: OpCode::Asin,       name: "Asin",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_asin),             weight: 1.0 },
+    OpDef { opcode: OpCode::Atan,       name: "Atan",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::atan),             weight: 1.0 },
+    OpDef { opcode: OpCode::Sinh,       name: "Sinh",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::sinh),             weight: 0.5 },
+    OpDef { opcode: OpCode::Cosh,       name: "Cosh",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::cosh),             weight: 0.5 },
+    OpDef { opcode: OpCode::Tanh,       name: "Tanh",       arity: Arity::Unary,    eval: EvalFn::Unary(f32::tanh),             weight: 1.0 },
+    OpDef { opcode: OpCode::Min,        name: "Min",        arity: Arity::Binary,   eval: EvalFn::Binary(f32::min),             weight: 1.0 },
+    OpDef { opcode: OpCode::Max,        name: "Max",        arity: Arity::Binary,   eval: EvalFn::Binary(f32::max),             weight: 1.0 },
+    OpDef { opcode: OpCode::Clamp,      name: "Clamp",      arity: Arity::Ternary,  eval: EvalFn::Ternary(eval_clamp),          weight: 1.0 },
+    OpDef { opcode: OpCode::Sign,       name: "Sign",       arity: Arity::Unary,    eval: EvalFn::Unary(eval_sign),             weight: 1.0 },
+    OpDef { opcode: OpCode::Floor,      name: "Floor",      arity: Arity::Unary,    eval: EvalFn::Unary(f32::floor),            weight: 1.0 },
+    OpDef { opcode: OpCode::Negate,     name: "Negate",     arity: Arity::Unary,    eval: EvalFn::Unary(eval_negate),           weight: 1.0 },
+    OpDef { opcode: OpCode::Step,       name: "Step",       arity: Arity::Binary,   eval: EvalFn::Binary(eval_step),            weight: 1.0 },
+    OpDef { opcode: OpCode::Reciprocal, name: "Reciprocal", arity: Arity::Unary,    eval: EvalFn::Unary(eval_reciprocal),       weight: 1.0 },
+    OpDef { opcode: OpCode::Invert,     name: "Invert",     arity: Arity::Unary,    eval: EvalFn::Unary(eval_invert),           weight: 1.0 },
     // Phase 3: Noise & spatial
-    OpDef { opcode: OpCode::ValueNoise, name: "ValueNoise", arity: Arity::Binary,   eval: EvalFn::Binary(eval_value_noise) },
-    OpDef { opcode: OpCode::FBM,        name: "FBM",        arity: Arity::Binary,   eval: EvalFn::BinaryLiteral(eval_fbm) },
-    OpDef { opcode: OpCode::MirrorX,    name: "MirrorX",    arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_mirror_x) },
-    OpDef { opcode: OpCode::MirrorY,    name: "MirrorY",    arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_mirror_y) },
-    // New operators
-    OpDef { opcode: OpCode::Atan2,      name: "Atan2",      arity: Arity::Binary,   eval: EvalFn::Binary(eval_atan2) },
-    OpDef { opcode: OpCode::Mod,        name: "Mod",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_mod) },
-    OpDef { opcode: OpCode::Worley,     name: "Worley",     arity: Arity::Binary,   eval: EvalFn::Binary(eval_worley) },
-    OpDef { opcode: OpCode::TriWave,    name: "TriWave",    arity: Arity::Unary,    eval: EvalFn::Unary(eval_triwave) },
-    OpDef { opcode: OpCode::Chebyshev,  name: "Chebyshev",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_chebyshev) },
-    OpDef { opcode: OpCode::Manhattan,  name: "Manhattan",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_manhattan) },
-    OpDef { opcode: OpCode::SinFold,    name: "SinFold",    arity: Arity::Unary,    eval: EvalFn::Unary(eval_sinfold) },
-    OpDef { opcode: OpCode::PaletteT,   name: "PaletteT",   arity: Arity::Nullary,  eval: EvalFn::PaletteTVal },
+    OpDef { opcode: OpCode::ValueNoise, name: "ValueNoise", arity: Arity::Binary,   eval: EvalFn::Binary(eval_value_noise),     weight: 1.2 },
+    OpDef { opcode: OpCode::FBM,        name: "FBM",        arity: Arity::Binary,   eval: EvalFn::BinaryLiteral(eval_fbm),      weight: 1.2 },
+    OpDef { opcode: OpCode::MirrorX,    name: "MirrorX",    arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_mirror_x),       weight: 1.0 },
+    OpDef { opcode: OpCode::MirrorY,    name: "MirrorY",    arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_mirror_y),       weight: 1.0 },
+    // Extended operators
+    OpDef { opcode: OpCode::Atan2,      name: "Atan2",      arity: Arity::Binary,   eval: EvalFn::Binary(eval_atan2),           weight: 1.0 },
+    OpDef { opcode: OpCode::Mod,        name: "Mod",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_mod),             weight: 1.0 },
+    OpDef { opcode: OpCode::Worley,     name: "Worley",     arity: Arity::Binary,   eval: EvalFn::Binary(eval_worley),          weight: 1.2 },
+    OpDef { opcode: OpCode::TriWave,    name: "TriWave",    arity: Arity::Unary,    eval: EvalFn::Unary(eval_triwave),          weight: 1.0 },
+    OpDef { opcode: OpCode::Chebyshev,  name: "Chebyshev",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_chebyshev),       weight: 1.2 },
+    OpDef { opcode: OpCode::Manhattan,  name: "Manhattan",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_manhattan),       weight: 1.2 },
+    OpDef { opcode: OpCode::SinFold,    name: "SinFold",    arity: Arity::Unary,    eval: EvalFn::Unary(eval_sinfold),          weight: 1.0 },
+    OpDef { opcode: OpCode::PaletteT,   name: "PaletteT",   arity: Arity::Nullary,  eval: EvalFn::PaletteTVal,                  weight: 1.0 },
+    // Noise variants
+    OpDef { opcode: OpCode::Turbulence,  name: "Turbulence",  arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_turbulence),  weight: 1.2 },
+    OpDef { opcode: OpCode::Ridged,      name: "Ridged",      arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_ridged),      weight: 1.2 },
+    OpDef { opcode: OpCode::Billow,      name: "Billow",      arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_billow),      weight: 1.2 },
+    OpDef { opcode: OpCode::SimplexNoise,name: "SimplexNoise",arity: Arity::Binary, eval: EvalFn::Binary(eval_simplex_noise),      weight: 1.2 },
+    OpDef { opcode: OpCode::DomainWarp,  name: "DomainWarp",  arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_domain_warp), weight: 1.2 },
+    OpDef { opcode: OpCode::ScaledX,     name: "ScaledX",     arity: Arity::Nullary, eval: EvalFn::Nullary(eval_scaled_x),           weight: 1.5 },
+    OpDef { opcode: OpCode::ScaledY,     name: "ScaledY",     arity: Arity::Nullary, eval: EvalFn::Nullary(eval_scaled_y),           weight: 1.5 },
 ];
 
 /// Look up an op's definition by opcode. Indexed by discriminant value.
 pub fn op_def(opcode: OpCode) -> &'static OpDef {
     &OP_REGISTRY[opcode as usize]
+}
+
+/// Weighted random selection from a non-empty slice of op definitions.
+pub fn weighted_choice<'a>(eligible: &[&'a OpDef], rng: &mut impl Rng) -> &'a OpDef {
+    let total: f32 = eligible.iter().map(|op| op.weight).sum();
+    let mut r = rng.gen_range(0.0..total);
+    for op in eligible {
+        r -= op.weight;
+        if r <= 0.0 { return op; }
+    }
+    eligible.last().unwrap()
 }

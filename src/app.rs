@@ -104,6 +104,8 @@ pub struct Individual {
     pub h_remap: Genome,
     pub s_remap: Genome,
     pub v_remap: Genome,
+    /// Color-space id in 0..config::NUM_COLOR_MODELS. See `channels_to_rgb`.
+    pub color_model: u32,
 }
 
 fn make_spatial_genome(rng: &mut impl Rng, max_depth: usize) -> Genome {
@@ -167,6 +169,7 @@ fn channel_ok(spatial: &Genome, remap: &Genome) -> bool {
 
 impl Individual {
     pub fn random_with_depth(rng: &mut impl Rng, max_depth: usize) -> Self {
+        let color_model = rng.gen_range(0..config::NUM_COLOR_MODELS);
         for _ in 0..10 {
             let mut ind = Self {
                 h: make_spatial_genome(rng, max_depth),
@@ -175,6 +178,7 @@ impl Individual {
                 h_remap: make_palette_genome(rng, max_depth),
                 s_remap: make_palette_genome(rng, max_depth),
                 v_remap: make_palette_genome(rng, max_depth),
+                color_model,
             };
             for _ in 0..9 {
                 let h_ok = channel_ok(&ind.h, &ind.h_remap);
@@ -194,6 +198,7 @@ impl Individual {
             h_remap: make_palette_genome(rng, max_depth),
             s_remap: make_palette_genome(rng, max_depth),
             v_remap: make_palette_genome(rng, max_depth),
+            color_model,
         }
     }
 
@@ -206,10 +211,10 @@ impl Individual {
                 let raw_h = (self.h.eval(nx, ny, 0.0).fract() + 1.0).fract();
                 let raw_s = (self.s.eval(nx, ny, 0.0).fract() + 1.0).fract();
                 let raw_v = (self.v.eval(nx, ny, 0.0).fract() + 1.0).fract();
-                let h = (self.h_remap.eval(0.0, 0.0, raw_h).fract() + 1.0).fract();
-                let s = (self.s_remap.eval(0.0, 0.0, raw_s).fract() + 1.0).fract();
-                let v = (self.v_remap.eval(0.0, 0.0, raw_v).fract() + 1.0).fract();
-                let [r, g, b] = hsv_to_rgb(h, s, v);
+                let c0 = (self.h_remap.eval(0.0, 0.0, raw_h).fract() + 1.0).fract();
+                let c1 = (self.s_remap.eval(0.0, 0.0, raw_s).fract() + 1.0).fract();
+                let c2 = (self.v_remap.eval(0.0, 0.0, raw_v).fract() + 1.0).fract();
+                let [r, g, b] = channels_to_rgb(self.color_model, c0, c1, c2);
                 pixels[y as usize * w as usize + x as usize] =
                     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
             }
@@ -222,21 +227,63 @@ impl Individual {
     }
 }
 
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
-    if s == 0.0 {
-        let c = (v * 255.0) as u8;
-        return [c, c, c];
+/// Human-readable name for a color-model id. Kept in sync with `channels_to_rgb`
+/// and the shader's `channels_to_rgb` switch.
+pub fn color_model_name(model: u32) -> &'static str {
+    match model {
+        0 => "HSV",
+        1 => "RGB",
+        2 => "HSL",
+        3 => "CMY",
+        4 => "YUV",
+        _ => "UNKNOWN",
     }
+}
+
+fn hsv_to_rgb_f(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    if s == 0.0 { return (v, v, v); }
     let i = (h * 6.0) as i32 % 6;
     let f = h * 6.0 - i as f32;
     let p = v * (1.0 - s);
     let q = v * (1.0 - f * s);
     let t = v * (1.0 - (1.0 - f) * s);
-    let (r, g, b) = match i {
+    match i {
         0 => (v, t, p), 1 => (q, v, p), 2 => (p, v, t),
         3 => (p, q, v), 4 => (t, p, v), _ => (v, p, q),
+    }
+}
+
+fn hsl_to_rgb_f(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s == 0.0 { return (l, l, l); }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let hue_to_c = |mut t: f32| -> f32 {
+        t = (t.fract() + 1.0).fract();
+        if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+        if t < 0.5 { return q; }
+        if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+        p
     };
-    [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
+    (hue_to_c(h + 1.0 / 3.0), hue_to_c(h), hue_to_c(h - 1.0 / 3.0))
+}
+
+/// Interpret three channel values in [0,1] as `model` and return linear RGB [0,255] bytes.
+/// Ids: 0=HSV, 1=RGB, 2=HSL, 3=CMY, 4=YUV (BT.601, U/V recentered to [-0.5,0.5]).
+fn channels_to_rgb(model: u32, c0: f32, c1: f32, c2: f32) -> [u8; 3] {
+    let (r, g, b) = match model {
+        0 => hsv_to_rgb_f(c0, c1, c2),
+        1 => (c0, c1, c2),
+        2 => hsl_to_rgb_f(c0, c1, c2),
+        3 => (1.0 - c0, 1.0 - c1, 1.0 - c2),
+        _ => {
+            let y = c0;
+            let u = c1 - 0.5;
+            let v = c2 - 0.5;
+            (y + 1.402 * v, y - 0.344136 * u - 0.714136 * v, y + 1.772 * u)
+        }
+    };
+    let clamp = |x: f32| (x.clamp(0.0, 1.0) * 255.0) as u8;
+    [clamp(r), clamp(g), clamp(b)]
 }
 
 // ============================================================================
@@ -251,6 +298,7 @@ pub struct RuntimeConfig {
     pub expression_mutation_prob: f64,
     pub dropout_prob: f64,
     pub duplication_prob: f64,
+    pub color_model_mutation_prob: f64,
     pub fresh_random_count: usize,
     pub max_tree_depth: usize,
 }
@@ -264,6 +312,7 @@ impl RuntimeConfig {
             expression_mutation_prob: config::EXPRESSION_MUTATION_PROB,
             dropout_prob: config::DROPOUT_PROB,
             duplication_prob: config::DUPLICATION_PROB,
+            color_model_mutation_prob: config::COLOR_MODEL_MUTATION_PROB,
             fresh_random_count: config::FRESH_RANDOM_COUNT,
             max_tree_depth: config::MAX_TREE_DEPTH,
         }
@@ -287,6 +336,7 @@ pub fn evolve_population(
         expression_mutation_prob: rt_config.expression_mutation_prob,
         dropout_prob: rt_config.dropout_prob,
         duplication_prob: rt_config.duplication_prob,
+        color_model_mutation_prob: rt_config.color_model_mutation_prob,
     };
 
     if sel.is_empty() {
@@ -308,6 +358,8 @@ pub fn evolve_population(
         let pa = &pop[sel[rng.gen_range(0..sel.len())]];
         if sel.len() > 1 && rng.gen_bool(0.3) {
             let pb = &pop[sel[rng.gen_range(0..sel.len())]];
+            // For crossover, inherit color model from one parent at random, then mutate.
+            let inherited = if rng.gen_bool(0.5) { pa.color_model } else { pb.color_model };
             next.push(Individual {
                 h: evolution::crossover(&pa.h, &pb.h, rng),
                 s: evolution::crossover(&pa.s, &pb.s, rng),
@@ -315,6 +367,7 @@ pub fn evolve_population(
                 h_remap: evolution::crossover(&pa.h_remap, &pb.h_remap, rng),
                 s_remap: evolution::crossover(&pa.s_remap, &pb.s_remap, rng),
                 v_remap: evolution::crossover(&pa.v_remap, &pb.v_remap, rng),
+                color_model: evolution::mutate_color_model(inherited, rng, &params),
             });
         } else {
             next.push(Individual {
@@ -324,6 +377,7 @@ pub fn evolve_population(
                 h_remap: evolution::mutate_palette_with_params(&pa.h_remap, rng, &params),
                 s_remap: evolution::mutate_palette_with_params(&pa.s_remap, rng, &params),
                 v_remap: evolution::mutate_palette_with_params(&pa.v_remap, rng, &params),
+                color_model: evolution::mutate_color_model(pa.color_model, rng, &params),
             });
         }
     }
@@ -376,13 +430,13 @@ impl App {
                         rt.block_on(r.render_tile_save_quality(
                             &raw(&job.ind.h), &raw(&job.ind.s), &raw(&job.ind.v),
                             &raw(&job.ind.h_remap), &raw(&job.ind.s_remap), &raw(&job.ind.v_remap),
-                            job.w, job.h, job.ssaa_factor, job.aa_samples,
+                            job.w, job.h, job.ssaa_factor, job.aa_samples, job.ind.color_model,
                         )).unwrap_or_else(|_| cpu_fallback())
                     } else {
                         rt.block_on(r.render_tile_at_size(
                             &raw(&job.ind.h), &raw(&job.ind.s), &raw(&job.ind.v),
                             &raw(&job.ind.h_remap), &raw(&job.ind.s_remap), &raw(&job.ind.v_remap),
-                            job.w, job.h, job.ssaa_factor,
+                            job.w, job.h, job.ssaa_factor, job.ind.color_model,
                         )).unwrap_or_else(|_| cpu_fallback())
                     }
                 } else {
@@ -633,7 +687,8 @@ impl App {
 
         let ind = &self.pop[idx];
         let text = format!(
-            "H:       {}\nS:       {}\nV:       {}\nH_remap: {}\nS_remap: {}\nV_remap: {}\n",
+            "color_model: {} ({})\nC0:       {}\nC1:       {}\nC2:       {}\nC0_remap: {}\nC1_remap: {}\nC2_remap: {}\n",
+            color_model_name(ind.color_model), ind.color_model,
             ind.h.to_expr_string(), ind.s.to_expr_string(), ind.v.to_expr_string(),
             ind.h_remap.to_expr_string(), ind.s_remap.to_expr_string(), ind.v_remap.to_expr_string(),
         );
@@ -899,6 +954,37 @@ mod viability_tests {
         let stdev = (brightness.iter().map(|&v| (v - mean).powi(2)).sum::<f32>()
             / brightness.len() as f32).sqrt();
         (mean, stdev)
+    }
+
+    #[test]
+    fn color_models_produce_distinct_renders() {
+        // Across many random individuals, every non-HSV model must produce a render
+        // that differs from the HSV (model 0) render on a majority of pixels for at
+        // least one sampled individual. This proves dispatch is wired end-to-end
+        // without being fooled by a single degenerate genome (e.g. one where s≡0
+        // over the whole tile, which makes HSV and HSL coincide by construction).
+        let mut rng = rand::thread_rng();
+        let mut seen_diff = [false; 5];
+        seen_diff[0] = true; // HSV vs HSV is trivially "same" — skip.
+
+        for _ in 0..12 {
+            let base = Individual::random_with_depth(&mut rng, config::MAX_TREE_DEPTH);
+            let baseline = base.render_tile_cpu_at_size(64, 36);
+            for model in 1..config::NUM_COLOR_MODELS {
+                let variant = Individual { color_model: model, ..base.clone() };
+                let pixels = variant.render_tile_cpu_at_size(64, 36);
+                let diffs = pixels.iter().zip(baseline.iter()).filter(|(a, b)| a != b).count();
+                let frac = diffs as f32 / pixels.len() as f32;
+                if frac > 0.5 { seen_diff[model as usize] = true; }
+            }
+            if seen_diff.iter().all(|&b| b) { break; }
+        }
+
+        for model in 1..config::NUM_COLOR_MODELS {
+            assert!(seen_diff[model as usize],
+                "model {} never produced a majority-different render from HSV across 12 random individuals",
+                model);
+        }
     }
 
     #[test]

@@ -224,6 +224,18 @@ canvas { display: block; border-radius: 6px; border: 1px solid var(--border); im
 .evo-svg-wrap svg { width: 100%; height: 100%; }
 .evo-canvas-wrap { text-align: center; margin-top: 0.75rem; }
 
+/* ── Mutation demo panels ────────────────────────────────── */
+.mut-demo { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+.mut-demo-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.4rem; }
+.mut-demo-header h3 { margin: 0; font-size: 0.88rem; font-weight: 600; }
+.mut-demo-desc { font-size: 0.78rem; color: var(--muted); margin: 0 0 1rem; line-height: 1.55; }
+.demo-pair { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.demo-panel { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 150px; }
+.demo-panel-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.4rem; }
+.demo-svg-wrap { width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; height: 160px; overflow: hidden; }
+.demo-svg-wrap svg { width: 100%; height: 100%; }
+.demo-panel canvas { border-radius: 6px; border: 1px solid var(--border); width: 100%; }
+
 /* ── Footer ──────────────────────────────────────────────── */
 footer { text-align: center; padding: 2.5rem; color: var(--muted); font-size: 0.8rem; }
 footer a { color: var(--accent); }
@@ -436,7 +448,7 @@ footer a { color: var(--accent); }
 <!-- ── Section 5: Evolution ──────────────────────────────── -->
 <section id="s-evo">
   <h2>5 · Evolution</h2>
-  <p class="section-sub">Crossover stitches a branch from one parent into another. Mutation replaces a random branch with something new.</p>
+  <p class="section-sub">Five operators shape each generation. <strong>Crossover</strong> grafts a branch from one parent into another. <strong>Replace subtree</strong> swaps a branch with a freshly grown one. <strong>Expression mutate</strong> swaps operators node-by-node without touching structure. <strong>Dropout</strong> collapses a subtree to a constant — a regularizer against bloat. <strong>Duplicate</strong> copies a subtree to another position, introducing self-similarity.</p>
 
   <div class="mut-controls">
     <h3>Settings — applied to both Crossover and Mutate</h3>
@@ -459,8 +471,11 @@ footer a { color: var(--accent); }
   </div>
 
   <div class="evo-controls">
-    <button id="btn-crossover" onclick="doCrossover()">&#x2717; Crossover</button>
-    <button id="btn-mutate"    onclick="doMutate()">&#8627; Mutate Parent A</button>
+    <button id="btn-crossover"   onclick="doCrossover()">&#x2717; Crossover</button>
+    <button id="btn-mutate"      onclick="doMutate()">&#8627; Replace subtree</button>
+    <button id="btn-expr-mutate" onclick="doExpressionMutate()">&#8764; Expression mutate</button>
+    <button id="btn-dropout"     onclick="doDropout()">&#8855; Dropout</button>
+    <button id="btn-duplicate"   onclick="doDuplicate()">&#8853; Duplicate</button>
     <button onclick="rerollEvo()">&#8635; New parents</button>
   </div>
 
@@ -483,6 +498,94 @@ footer a { color: var(--accent); }
       <div class="evo-canvas-wrap"><canvas id="evo-canvas-child" width="200" height="150"></canvas></div>
     </div>
   </div>
+
+  <!-- ── Expression Mutate Demo ── -->
+  <div class="mut-demo">
+    <div class="mut-demo-header">
+      <h3>&#8764; Expression Mutate</h3>
+      <button onclick="rollExprDemo()">&#8635; New example</button>
+    </div>
+    <p class="mut-demo-desc">Walks every node and swaps its operator for a random same-arity alternative (10% per node). Tree structure is unchanged — only the operations differ. Changed nodes shown in orange.</p>
+    <div class="demo-pair">
+      <div class="demo-panel">
+        <div class="demo-panel-label">Before</div>
+        <div class="demo-svg-wrap"><svg id="demo-expr-svg-before" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="demo-panel">
+        <div class="demo-panel-label">After</div>
+        <div class="demo-svg-wrap"><svg id="demo-expr-svg-after" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+    </div>
+    <div class="demo-pair">
+      <div class="demo-panel">
+        <div class="demo-panel-label">Before</div>
+        <canvas id="demo-expr-canvas-before" width="200" height="150"></canvas>
+      </div>
+      <div class="demo-panel">
+        <div class="demo-panel-label">After</div>
+        <canvas id="demo-expr-canvas-after" width="200" height="150"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Dropout Demo ── -->
+  <div class="mut-demo">
+    <div class="mut-demo-header">
+      <h3>&#8855; Dropout</h3>
+      <button onclick="rollDropoutDemo()">&#8635; New example</button>
+    </div>
+    <p class="mut-demo-desc">Picks a random non-root subtree and collapses it to a single constant. Acts as a regularizer against tree bloat. The dropped subtree is shown in orange in the Before tree.</p>
+    <div class="demo-pair">
+      <div class="demo-panel">
+        <div class="demo-panel-label">Before</div>
+        <div class="demo-svg-wrap"><svg id="demo-drop-svg-before" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="demo-panel">
+        <div class="demo-panel-label">After</div>
+        <div class="demo-svg-wrap"><svg id="demo-drop-svg-after" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+    </div>
+    <div class="demo-pair">
+      <div class="demo-panel">
+        <div class="demo-panel-label">Before</div>
+        <canvas id="demo-drop-canvas-before" width="200" height="150"></canvas>
+      </div>
+      <div class="demo-panel">
+        <div class="demo-panel-label">After</div>
+        <canvas id="demo-drop-canvas-after" width="200" height="150"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Duplicate Demo ── -->
+  <div class="mut-demo">
+    <div class="mut-demo-header">
+      <h3>&#8853; Duplicate</h3>
+      <button onclick="rollDupDemo()">&#8635; New example</button>
+    </div>
+    <p class="mut-demo-desc">Picks a source subtree (blue) and copies it over a destination subtree (red). Creates self-similar patterns. The pasted copy is shown in orange in the After tree.</p>
+    <div class="demo-pair">
+      <div class="demo-panel">
+        <div class="demo-panel-label">Before</div>
+        <div class="demo-svg-wrap"><svg id="demo-dup-svg-before" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+      <div class="demo-panel">
+        <div class="demo-panel-label">After</div>
+        <div class="demo-svg-wrap"><svg id="demo-dup-svg-after" preserveAspectRatio="xMidYMid meet"></svg></div>
+      </div>
+    </div>
+    <div class="demo-pair">
+      <div class="demo-panel">
+        <div class="demo-panel-label">Before</div>
+        <canvas id="demo-dup-canvas-before" width="200" height="150"></canvas>
+      </div>
+      <div class="demo-panel">
+        <div class="demo-panel-label">After</div>
+        <canvas id="demo-dup-canvas-after" width="200" height="150"></canvas>
+      </div>
+    </div>
+  </div>
+
 </section>
 
 <footer>
@@ -662,32 +765,66 @@ function clearCanvas(canvas) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-// ─── SVG Tree Layout & Rendering ─────────────────────────────────────────────
+// ─── Global Style Config ──────────────────────────────────────────────────────
 
-const NODE_R  = 24;
-const LEVEL_H = 70;
-const LEAF_W  = 56;
+const STYLE = {
+  // Tree layout
+  nodeR:  29,   // node circle radius
+  levelH: 75,   // vertical distance between tree levels
+  leafW:  69,   // horizontal distance between leaf nodes
+
+  // Edges
+  edgeColor: '#c0bbb0',
+  edgeWidth:  2,
+
+  // Node rings
+  nodeStroke:  '#1a1714',
+  hiStrokeW:   2.5,
+  dimStrokeW:  1.5,
+  dimAlpha:    '22',   // 2-char hex suffix for non-highlighted fill
+
+  // Operator group colors (building-blocks section + default node fill)
+  groupColor: {
+    terminal: '#1a5c8c',
+    unary:    '#2a6b2a',
+    binary:   '#b85c18',
+    ternary:  '#5e3a8a',
+  },
+
+  // Node colors used across all panels
+  evoA:     '#1a5c8c',  // Parent A / unchanged
+  evoB:     '#a02020',  // Parent B / destination
+  colorMut: '#e07830',  // mutated / duplicated nodes
+
+  // Text
+  textOutline:  true,
+  outlineColor: '#5e5c64',
+  outlineWidth: 2,
+  textColor:    '#ffffff',
+  fontSize:     24,     // 0 → auto by label length (10 / 13 / 16); >0 → fixed override
+
+  // Animation
+  animMs: 60,
+};
+
+// ─── SVG Tree Layout & Rendering ─────────────────────────────────────────────
 
 function computeLayout(root) {
   let leaf = 0;
   function lay(n, depth) {
     if (n.children.length === 0) {
-      n._x = leaf * LEAF_W; n._y = depth * LEVEL_H; leaf++;
+      n._x = leaf * STYLE.leafW; n._y = depth * STYLE.levelH; leaf++;
     } else {
       n.children.forEach(c => lay(c, depth + 1));
       const xs = n.children.map(c => c._x);
       n._x = (Math.min(...xs) + Math.max(...xs)) / 2;
-      n._y = depth * LEVEL_H;
+      n._y = depth * STYLE.levelH;
     }
   }
   lay(root, 0);
 }
 
-const GROUP_COLOR = { terminal:'#1a5c8c', unary:'#2a6b2a', binary:'#b85c18', ternary:'#5e3a8a' };
-const EVO_A_COLOR = '#1a5c8c';  // blue  — Parent A origin
-const EVO_B_COLOR = '#a02020';  // red   — Parent B origin
-
-function nodeColor(op) { return GROUP_COLOR[BY_ID[op]?.group] || '#888'; }
+function nodeColor(op) { return STYLE.groupColor[BY_ID[op]?.group] || '#888'; }
 
 function nodeLabel(node) {
   if (node.op === 'const') return node.value.toFixed(1);
@@ -710,9 +847,10 @@ function subtreeIds(node) {
 
 function allIds(root) { return new Set(allNodes(root).map(n => n.id)); }
 
-function renderSVG(svgEl, root, visibleIds = null, highlightIds = null, nodeColorFn = null) {
+function renderSVG(svgEl, root, visibleIds = null, highlightIds = null, nodeColorFn = null, overrides = {}) {
   if (!root) { svgEl.innerHTML = ''; return; }
   computeLayout(root);
+  const s = { ...STYLE, ...overrides };
 
   const nodes = allNodes(root);
   const edges = [];
@@ -724,25 +862,30 @@ function renderSVG(svgEl, root, visibleIds = null, highlightIds = null, nodeColo
   const visEdges = edges.filter(e => visSet.has(e.from.id) && visSet.has(e.to.id));
 
   const xs = nodes.map(n => n._x), ys = nodes.map(n => n._y);
-  const minX = Math.min(...xs) - NODE_R - 8,  maxX = Math.max(...xs) + NODE_R + 8;
-  const minY = Math.min(...ys) - NODE_R - 8,  maxY = Math.max(...ys) + NODE_R + 8;
+  const pad = s.nodeR + 8;
+  const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
+  const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
   svgEl.setAttribute('viewBox', `${minX} ${minY} ${maxX - minX} ${maxY - minY}`);
 
   let h = '';
   for (const e of visEdges)
-    h += `<line x1="${e.from._x}" y1="${e.from._y}" x2="${e.to._x}" y2="${e.to._y}" stroke="#c0bbb0" stroke-width="2"/>`;
+    h += `<line x1="${e.from._x}" y1="${e.from._y}" x2="${e.to._x}" y2="${e.to._y}" stroke="${s.edgeColor}" stroke-width="${s.edgeWidth}"/>`;
 
   for (const n of visible) {
-    const col = nodeColorFn ? nodeColorFn(n) : nodeColor(n.op);
-    const hi  = highlightIds && highlightIds.has(n.id);
-    const fill   = hi ? col : col + '22';
-    const stroke = hi ? '#1a1714' : col;
-    const sw     = hi ? 2.5 : 1.5;
+    const col    = nodeColorFn ? nodeColorFn(n) : nodeColor(n.op);
+    const hi     = highlightIds && highlightIds.has(n.id);
+    const fill   = hi ? col : col + s.dimAlpha;
+    const stroke = hi ? s.nodeStroke : col;
+    const sw     = hi ? s.hiStrokeW  : s.dimStrokeW;
     const lbl    = nodeLabel(n);
-    const fs     = lbl.length > 4 ? 10 : lbl.length > 2 ? 13 : 16;
-    h += `<circle cx="${n._x}" cy="${n._y}" r="${NODE_R}" fill="#ffffff" stroke="none"/>`;
-    h += `<circle cx="${n._x}" cy="${n._y}" r="${NODE_R}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
-    h += `<text x="${n._x}" y="${n._y + fs*0.38}" text-anchor="middle" font-size="${fs}" fill="${stroke}" font-family="monospace" font-weight="600">${lbl}</text>`;
+    const fs     = s.fontSize > 0 ? s.fontSize : (lbl.length > 4 ? 10 : lbl.length > 2 ? 13 : 16);
+    const r      = s.nodeR;
+    h += `<circle cx="${n._x}" cy="${n._y}" r="${r}" fill="#ffffff" stroke="none"/>`;
+    h += `<circle cx="${n._x}" cy="${n._y}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    const tFill   = s.textColor ?? (s.textOutline ? '#000000' : stroke);
+    const tStroke = s.textOutline
+      ? ` stroke="${s.outlineColor}" stroke-width="${s.outlineWidth}" paint-order="stroke"` : '';
+    h += `<text x="${n._x}" y="${n._y + fs*0.38}" text-anchor="middle" font-size="${fs}" fill="${tFill}"${tStroke} font-family="monospace" font-weight="600">${lbl}</text>`;
   }
   svgEl.innerHTML = h;
 }
@@ -773,7 +916,7 @@ function selectChip(chip, op) {
   document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
   chip.classList.add('active');
   const info = document.getElementById('chip-info');
-  const col = GROUP_COLOR[op.group] || '#888';
+  const col = STYLE.groupColor[op.group] || '#888';
   info.style.borderLeftColor = col;
   info.innerHTML = `<strong style="color:${col}">${op.label}</strong> &nbsp;—&nbsp; ${op.desc}`;
 }
@@ -782,7 +925,7 @@ function selectChip(chip, op) {
 
 let currentTree = null;
 let animTimer   = null;
-const ANIM_MS   = 60;
+const ANIM_MS = STYLE.animMs;
 
 document.getElementById('depth-slider').oninput = function() {
   document.getElementById('depth-val').textContent = this.value;
@@ -859,13 +1002,13 @@ function rerollEvo() {
   const d = Math.min(parseInt(document.getElementById('depth-slider').value), 4);
   evoA = randomTree(d);
   evoB = randomTree(d);
-  renderSVG(document.getElementById('evo-svg-a'), evoA, null, allIds(evoA), () => EVO_A_COLOR);
-  renderSVG(document.getElementById('evo-svg-b'), evoB, null, allIds(evoB), () => EVO_B_COLOR);
+  renderSVG(document.getElementById('evo-svg-a'), evoA, null, allIds(evoA), () => STYLE.evoA);
+  renderSVG(document.getElementById('evo-svg-b'), evoB, null, allIds(evoB), () => STYLE.evoB);
   renderGray(document.getElementById('evo-canvas-a'), evoA);
   renderGray(document.getElementById('evo-canvas-b'), evoB);
   clearCanvas(document.getElementById('evo-canvas-child'));
   document.getElementById('evo-svg-child').innerHTML =
-    '<text x="50%" y="50%" text-anchor="middle" font-size="12" fill="#aaa8a0" font-family="system-ui">Press Crossover or Mutate</text>';
+    '<text x="50%" y="50%" text-anchor="middle" font-size="12" fill="#aaa8a0" font-family="system-ui">Press an operator above</text>';
 }
 
 // Returns all nodes as a flat list; set onlyNonRoot=true to skip root
@@ -925,11 +1068,14 @@ function flatNodesAtMaxDepth(root, maxDepth) {
   return list;
 }
 
+const EVO_BTN_IDS = ['btn-crossover', 'btn-mutate', 'btn-expr-mutate', 'btn-dropout', 'btn-duplicate'];
+function disableEvoButtons(disabled) {
+  EVO_BTN_IDS.forEach(id => { document.getElementById(id).disabled = disabled; });
+}
+
 function doCrossover() {
   if (!evoA || !evoB) return;
-  const btnCross = document.getElementById('btn-crossover');
-  const btnMut   = document.getElementById('btn-mutate');
-  btnCross.disabled = btnMut.disabled = true;
+  disableEvoButtons(true);
 
   const svgA = document.getElementById('evo-svg-a');
   const svgB = document.getElementById('evo-svg-b');
@@ -946,8 +1092,8 @@ function doCrossover() {
   const hiB = subtreeIds(nodeB);
 
   // Highlight the selected swap subtrees in each parent
-  renderSVG(svgA, evoA, null, hiA, () => EVO_A_COLOR);
-  renderSVG(svgB, evoB, null, hiB, () => EVO_B_COLOR);
+  renderSVG(svgA, evoA, null, hiA, () => STYLE.evoA);
+  renderSVG(svgB, evoB, null, hiB, () => STYLE.evoB);
 
   setTimeout(() => {
     // Pure crossover: swap nodeA's position in evoA with nodeB's subtree
@@ -957,21 +1103,19 @@ function doCrossover() {
     if (mutMode === 'finetune') nudgeConstantsInPlace(child);
 
     // Blue = from Parent A · Red = from Parent B
-    const childColorFn = n => bIds.has(n.id) ? EVO_B_COLOR : EVO_A_COLOR;
+    const childColorFn = n => bIds.has(n.id) ? STYLE.evoB : STYLE.evoA;
     renderSVG(svgC, child, null, allIds(child), childColorFn);
     renderGray(document.getElementById('evo-canvas-child'), child);
 
-    renderSVG(svgA, evoA, null, allIds(evoA), () => EVO_A_COLOR);
-    renderSVG(svgB, evoB, null, allIds(evoB), () => EVO_B_COLOR);
-    btnCross.disabled = btnMut.disabled = false;
+    renderSVG(svgA, evoA, null, allIds(evoA), () => STYLE.evoA);
+    renderSVG(svgB, evoB, null, allIds(evoB), () => STYLE.evoB);
+    disableEvoButtons(false);
   }, 750);
 }
 
 function doMutate() {
   if (!evoA) return;
-  const btnCross = document.getElementById('btn-crossover');
-  const btnMut   = document.getElementById('btn-mutate');
-  btnCross.disabled = btnMut.disabled = true;
+  disableEvoButtons(true);
 
   const svgA = document.getElementById('evo-svg-a');
   const svgC = document.getElementById('evo-svg-child');
@@ -981,7 +1125,7 @@ function doMutate() {
   const hiSet  = subtreeIds(target);
 
   // Phase 1: highlight mutation target
-  renderSVG(svgA, evoA, null, hiSet, () => EVO_A_COLOR);
+  renderSVG(svgA, evoA, null, hiSet, () => STYLE.evoA);
 
   setTimeout(() => {
     let child;
@@ -992,11 +1136,172 @@ function doMutate() {
       const fresh = randomTree(depth);
       child = replaceById(evoA, target.id, fresh);
     }
-    renderSVG(svgC, child, null, allIds(child), () => EVO_A_COLOR);
+    renderSVG(svgC, child, null, allIds(child), () => STYLE.evoA);
     renderGray(document.getElementById('evo-canvas-child'), child);
-    renderSVG(svgA, evoA, null, allIds(evoA), () => EVO_A_COLOR);
-    btnCross.disabled = btnMut.disabled = false;
+    renderSVG(svgA, evoA, null, allIds(evoA), () => STYLE.evoA);
+    disableEvoButtons(false);
   }, 750);
+}
+
+function doExpressionMutate() {
+  if (!evoA) return;
+  disableEvoButtons(true);
+
+  const svgA = document.getElementById('evo-svg-a');
+  const svgC = document.getElementById('evo-svg-child');
+
+  // Phase 1: light up all nodes to signal we'll walk the whole tree
+  renderSVG(svgA, evoA, null, allIds(evoA), () => STYLE.evoA);
+
+  setTimeout(() => {
+    const changedIds = new Set();
+    const child = evoA.clone();
+
+    function walk(node) {
+      const op = BY_ID[node.op];
+      const candidates = OPS.filter(o => o.arity === op.arity && o.id !== node.op);
+      if (candidates.length > 0 && Math.random() < 0.10) {
+        const newOp = pick(candidates);
+        node.op = newOp.id;
+        if (node.op === 'const') node.value = Math.random() * 2 - 1;
+        changedIds.add(node.id);
+      }
+      node.children.forEach(walk);
+    }
+    walk(child);
+
+    const childColorFn = n => changedIds.has(n.id) ? STYLE.colorMut : STYLE.evoA;
+    renderSVG(svgC, child, null, allIds(child), childColorFn);
+    renderGray(document.getElementById('evo-canvas-child'), child);
+    renderSVG(svgA, evoA, null, allIds(evoA), () => STYLE.evoA);
+    disableEvoButtons(false);
+  }, 750);
+}
+
+function doDropout() {
+  if (!evoA) return;
+  disableEvoButtons(true);
+
+  const svgA = document.getElementById('evo-svg-a');
+  const svgC = document.getElementById('evo-svg-child');
+
+  const nonRoot = flatNodes(evoA, true);
+  if (!nonRoot.length) { disableEvoButtons(false); return; }
+
+  const target = pick(nonRoot);
+  const hiSet  = subtreeIds(target);
+
+  // Phase 1: highlight the subtree being collapsed
+  renderSVG(svgA, evoA, null, hiSet, () => STYLE.evoA);
+
+  setTimeout(() => {
+    const constNode = new Node('const', [], Math.random() * 2 - 1);
+    const child = replaceById(evoA, target.id, constNode);
+
+    renderSVG(svgC, child, null, allIds(child), () => STYLE.evoA);
+    renderGray(document.getElementById('evo-canvas-child'), child);
+    renderSVG(svgA, evoA, null, allIds(evoA), () => STYLE.evoA);
+    disableEvoButtons(false);
+  }, 750);
+}
+
+function doDuplicate() {
+  if (!evoA) return;
+  disableEvoButtons(true);
+
+  const svgA = document.getElementById('evo-svg-a');
+  const svgC = document.getElementById('evo-svg-child');
+
+  const allNodesList = flatNodes(evoA);
+  const nonRoot      = flatNodes(evoA, true);
+
+  if (allNodesList.length < 3 || nonRoot.length < 2) { disableEvoButtons(false); return; }
+
+  const src = pick(allNodesList);
+  const srcSubtreeIds = subtreeIds(src);
+  // Destination must be non-root and not inside the source subtree
+  const dstCandidates = nonRoot.filter(n => !srcSubtreeIds.has(n.id) && n.id !== src.id);
+  if (!dstCandidates.length) { disableEvoButtons(false); return; }
+  const dst = pick(dstCandidates);
+
+  const hiSrc = subtreeIds(src);
+  const hiDst = subtreeIds(dst);
+
+  // Phase 1: source in A-color, destination in B-color
+  renderSVG(svgA, evoA, null, new Set([...hiSrc, ...hiDst]),
+    n => hiSrc.has(n.id) ? STYLE.evoA : STYLE.evoB);
+
+  setTimeout(() => {
+    const { tree: child, bIds } = replaceByIdAndTrack(evoA, dst.id, src);
+
+    const childColorFn = n => bIds.has(n.id) ? STYLE.colorMut : STYLE.evoA;
+    renderSVG(svgC, child, null, allIds(child), childColorFn);
+    renderGray(document.getElementById('evo-canvas-child'), child);
+    renderSVG(svgA, evoA, null, allIds(evoA), () => STYLE.evoA);
+    disableEvoButtons(false);
+  }, 750);
+}
+
+// ─── Mutation Demo Panels ─────────────────────────────────────────────────────
+
+function rollExprDemo() {
+  const tree = randomTree(3);
+  const child = tree.clone();
+  const changedIds = new Set();
+
+  function walkExpr(node) {
+    const op = BY_ID[node.op];
+    const candidates = OPS.filter(o => o.arity === op.arity && o.id !== node.op);
+    if (candidates.length > 0 && Math.random() < 0.10) {
+      node.op = pick(candidates).id;
+      if (node.op === 'const') node.value = Math.random() * 2 - 1;
+      changedIds.add(node.id);
+    }
+    node.children.forEach(walkExpr);
+  }
+  walkExpr(child);
+
+  renderSVG(document.getElementById('demo-expr-svg-before'), tree,  null, allIds(tree),  () => STYLE.evoA);
+  renderSVG(document.getElementById('demo-expr-svg-after'),  child, null, allIds(child), n => changedIds.has(n.id) ? STYLE.colorMut : STYLE.evoA);
+  renderGray(document.getElementById('demo-expr-canvas-before'), tree);
+  renderGray(document.getElementById('demo-expr-canvas-after'),  child);
+}
+
+function rollDropoutDemo() {
+  const tree = randomTree(3);
+  const nonRoot = flatNodes(tree, true);
+  if (!nonRoot.length) { rollDropoutDemo(); return; }
+
+  const target = pick(nonRoot);
+  const hiSet  = subtreeIds(target);
+  const child  = replaceById(tree, target.id, new Node('const', [], Math.random() * 2 - 1));
+
+  renderSVG(document.getElementById('demo-drop-svg-before'), tree,  null, allIds(tree),  n => hiSet.has(n.id) ? STYLE.colorMut : STYLE.evoA);
+  renderSVG(document.getElementById('demo-drop-svg-after'),  child, null, allIds(child), () => STYLE.evoA);
+  renderGray(document.getElementById('demo-drop-canvas-before'), tree);
+  renderGray(document.getElementById('demo-drop-canvas-after'),  child);
+}
+
+function rollDupDemo() {
+  const tree = randomTree(3);
+  const allNodesList = flatNodes(tree);
+  const nonRoot      = flatNodes(tree, true);
+  if (allNodesList.length < 3 || nonRoot.length < 2) { rollDupDemo(); return; }
+
+  const src = pick(allNodesList);
+  const srcSubIds = subtreeIds(src);
+  const dstCandidates = nonRoot.filter(n => !srcSubIds.has(n.id) && n.id !== src.id);
+  if (!dstCandidates.length) { rollDupDemo(); return; }
+  const dst = pick(dstCandidates);
+
+  const hiSrc = subtreeIds(src);
+  const hiDst = subtreeIds(dst);
+  const { tree: child, bIds } = replaceByIdAndTrack(tree, dst.id, src);
+
+  renderSVG(document.getElementById('demo-dup-svg-before'), tree,  null, allIds(tree),  n => hiDst.has(n.id) ? STYLE.evoB : STYLE.evoA);
+  renderSVG(document.getElementById('demo-dup-svg-after'),  child, null, allIds(child), n => bIds.has(n.id) ? STYLE.colorMut : STYLE.evoA);
+  renderGray(document.getElementById('demo-dup-canvas-before'), tree);
+  renderGray(document.getElementById('demo-dup-canvas-after'),  child);
 }
 
 // ─── Remap ────────────────────────────────────────────────────────────────────
@@ -1160,6 +1465,9 @@ buildChips();
 ].forEach(id => clearCanvas(document.getElementById(id)));
 
 rerollEvo();
+rollExprDemo();
+rollDropoutDemo();
+rollDupDemo();
 updateHSV();
 
 // Auto-roll immediately so the tree is already growing when the page appears

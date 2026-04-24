@@ -61,6 +61,14 @@ const OP_CHEBYSHEV: u32 = 41;
 const OP_MANHATTAN: u32 = 42;
 const OP_SINFOLD: u32 = 43;
 const OP_PALETTE_T: u32 = 44;
+// Noise variants
+const OP_TURBULENCE: u32 = 45;
+const OP_RIDGED: u32 = 46;
+const OP_BILLOW: u32 = 47;
+const OP_SIMPLEX_NOISE: u32 = 48;
+const OP_DOMAIN_WARP: u32 = 49;
+const OP_SCALED_X: u32 = 50;
+const OP_SCALED_Y: u32 = 51;
 
 // Maximum stack depth for interpreter (auto-generated from config.rs)
 const MAX_STACK: u32 = 256;
@@ -74,8 +82,9 @@ struct OutputInfo {
     tile_h: u32,
     jitter_x: f32,
     jitter_y: f32,
-    _pad0: f32,
-    _pad1: f32,
+    // 0=HSV, 1=RGB, 2=HSL, 3=CMY, 4=YUV (BT.601). Chosen per-render by the host.
+    color_model: u32,
+    _pad: u32,
 };
 
 // Flat storage buffer of all instructions (6 genomes: H S V H_remap S_remap V_remap)
@@ -111,6 +120,50 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> vec3<f32> {
         default { rgb = vec3<f32>(0.0, 0.0, 0.0); }
     }
     return rgb;
+}
+
+// One of three HSL hue→channel lookups; `t` is the hue offset for this channel.
+fn hsl_hue_to_c(p: f32, q: f32, t_in: f32) -> f32 {
+    var t = fract(fract(t_in) + 1.0);
+    if (t < 1.0 / 6.0) { return p + (q - p) * 6.0 * t; }
+    if (t < 0.5) { return q; }
+    if (t < 2.0 / 3.0) { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+    return p;
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> vec3<f32> {
+    if (s == 0.0) { return vec3<f32>(l, l, l); }
+    var q: f32;
+    if (l < 0.5) { q = l * (1.0 + s); } else { q = l + s - l * s; }
+    let p = 2.0 * l - q;
+    return vec3<f32>(
+        hsl_hue_to_c(p, q, h + 1.0 / 3.0),
+        hsl_hue_to_c(p, q, h),
+        hsl_hue_to_c(p, q, h - 1.0 / 3.0),
+    );
+}
+
+// BT.601: U and V arrive in [0,1] and are recentered to [-0.5, 0.5].
+fn yuv_to_rgb(y: f32, u_in: f32, v_in: f32) -> vec3<f32> {
+    let u = u_in - 0.5;
+    let v = v_in - 0.5;
+    return vec3<f32>(
+        y + 1.402 * v,
+        y - 0.344136 * u - 0.714136 * v,
+        y + 1.772 * u,
+    );
+}
+
+// Dispatch three channels (each in [0,1]) to linear RGB according to model id.
+fn channels_to_rgb(model: u32, c0: f32, c1: f32, c2: f32) -> vec3<f32> {
+    switch (model) {
+        case 0u { return hsv_to_rgb(c0, c1, c2); }
+        case 1u { return vec3<f32>(c0, c1, c2); }
+        case 2u { return hsl_to_rgb(c0, c1, c2); }
+        case 3u { return vec3<f32>(1.0 - c0, 1.0 - c1, 1.0 - c2); }
+        case 4u { return yuv_to_rgb(c0, c1, c2); }
+        default { return hsv_to_rgb(c0, c1, c2); }
+    }
 }
 
 // Bytecode interpreter - evaluates a genome at given coordinates.
@@ -437,6 +490,167 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
                 else { result = 0.0; }
             }
             case OP_PALETTE_T { result = t; }
+            case OP_TURBULENCE {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                let octaves = i32(instr.c);
+                if (a_idx < sp && b_idx < sp) {
+                    var value: f32 = 0.0;
+                    var amplitude: f32 = 1.0;
+                    var frequency: f32 = 1.0;
+                    var max_val: f32 = 0.0;
+                    for (var o: i32 = 0; o < max(1, min(8, octaves)); o += 1) {
+                        let vx = stack[a_idx] * frequency;
+                        let vy = stack[b_idx] * frequency;
+                        let xi = floor(vx); let yi = floor(vy);
+                        let fx = vx - xi; let fy = vy - yi;
+                        let fa = sin(xi * 127.1 + yi * 311.3);
+                        let fb = sin((xi + 1.0) * 127.1 + yi * 311.3);
+                        let fc = sin(xi * 127.1 + (yi + 1.0) * 311.3);
+                        let fd = sin((xi + 1.0) * 127.1 + (yi + 1.0) * 311.3);
+                        let noise = mix(mix(fa, fb, fx), mix(fc, fd, fx), fy);
+                        value += abs(noise) * amplitude;
+                        max_val += amplitude;
+                        amplitude *= 0.5;
+                        frequency *= 2.0;
+                    }
+                    if (max_val > 0.0) { result = value / max_val; } else { result = 0.0; }
+                } else { result = 0.0; }
+            }
+            case OP_RIDGED {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                let octaves = i32(instr.c);
+                if (a_idx < sp && b_idx < sp) {
+                    var value: f32 = 0.0;
+                    var amplitude: f32 = 1.0;
+                    var frequency: f32 = 1.0;
+                    var max_val: f32 = 0.0;
+                    for (var o: i32 = 0; o < max(1, min(8, octaves)); o += 1) {
+                        let vx = stack[a_idx] * frequency;
+                        let vy = stack[b_idx] * frequency;
+                        let xi = floor(vx); let yi = floor(vy);
+                        let fx = vx - xi; let fy = vy - yi;
+                        let fa = sin(xi * 127.1 + yi * 311.3);
+                        let fb = sin((xi + 1.0) * 127.1 + yi * 311.3);
+                        let fc = sin(xi * 127.1 + (yi + 1.0) * 311.3);
+                        let fd = sin((xi + 1.0) * 127.1 + (yi + 1.0) * 311.3);
+                        let noise = mix(mix(fa, fb, fx), mix(fc, fd, fx), fy);
+                        value += (1.0 - abs(noise)) * amplitude;
+                        max_val += amplitude;
+                        amplitude *= 0.5;
+                        frequency *= 2.0;
+                    }
+                    if (max_val > 0.0) { result = value / max_val; } else { result = 0.0; }
+                } else { result = 0.0; }
+            }
+            case OP_BILLOW {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                let octaves = i32(instr.c);
+                if (a_idx < sp && b_idx < sp) {
+                    var value: f32 = 0.0;
+                    var amplitude: f32 = 1.0;
+                    var frequency: f32 = 1.0;
+                    var max_val: f32 = 0.0;
+                    for (var o: i32 = 0; o < max(1, min(8, octaves)); o += 1) {
+                        let vx = stack[a_idx] * frequency;
+                        let vy = stack[b_idx] * frequency;
+                        let xi = floor(vx); let yi = floor(vy);
+                        let fx = vx - xi; let fy = vy - yi;
+                        let fa = sin(xi * 127.1 + yi * 311.3);
+                        let fb = sin((xi + 1.0) * 127.1 + yi * 311.3);
+                        let fc = sin(xi * 127.1 + (yi + 1.0) * 311.3);
+                        let fd = sin((xi + 1.0) * 127.1 + (yi + 1.0) * 311.3);
+                        let noise = mix(mix(fa, fb, fx), mix(fc, fd, fx), fy);
+                        value += (abs(noise) * 2.0 - 1.0) * amplitude;
+                        max_val += amplitude;
+                        amplitude *= 0.5;
+                        frequency *= 2.0;
+                    }
+                    if (max_val > 0.0) { result = value / max_val; } else { result = 0.0; }
+                } else { result = 0.0; }
+            }
+            case OP_SIMPLEX_NOISE {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                if (a_idx < sp && b_idx < sp) {
+                    let vx = stack[a_idx];
+                    let vy = stack[b_idx];
+                    let F2 = 0.366025404;
+                    let G2 = 0.211324865;
+                    let s = (vx + vy) * F2;
+                    let i = floor(vx + s);
+                    let j = floor(vy + s);
+                    let t0 = (i + j) * G2;
+                    let x0 = vx - i + t0;
+                    let y0 = vy - j + t0;
+                    var i1: f32; var j1: f32;
+                    if (x0 > y0) { i1 = 1.0; j1 = 0.0; } else { i1 = 0.0; j1 = 1.0; }
+                    let x1 = x0 - i1 + G2;
+                    let y1 = y0 - j1 + G2;
+                    let x2 = x0 - 1.0 + 2.0 * G2;
+                    let y2 = y0 - 1.0 + 2.0 * G2;
+                    var n: f32 = 0.0;
+                    var tc: f32 = 0.5 - x0*x0 - y0*y0;
+                    if (tc > 0.0) {
+                        let h = fract(sin(i * 127.1 + j * 311.3) * 43758.5);
+                        n += tc*tc*tc*tc * (cos(h * 6.28318) * x0 + sin(h * 6.28318) * y0);
+                    }
+                    tc = 0.5 - x1*x1 - y1*y1;
+                    if (tc > 0.0) {
+                        let h = fract(sin((i+i1) * 127.1 + (j+j1) * 311.3) * 43758.5);
+                        n += tc*tc*tc*tc * (cos(h * 6.28318) * x1 + sin(h * 6.28318) * y1);
+                    }
+                    tc = 0.5 - x2*x2 - y2*y2;
+                    if (tc > 0.0) {
+                        let h = fract(sin((i+1.0) * 127.1 + (j+1.0) * 311.3) * 43758.5);
+                        n += tc*tc*tc*tc * (cos(h * 6.28318) * x2 + sin(h * 6.28318) * y2);
+                    }
+                    result = n * 70.0;
+                } else { result = 0.0; }
+            }
+            case OP_DOMAIN_WARP {
+                let a_idx = u32(instr.a);
+                let b_idx = u32(instr.b);
+                let octaves = i32(instr.c);
+                if (a_idx < sp && b_idx < sp) {
+                    let vx = stack[a_idx];
+                    let vy = stack[b_idx];
+                    // compute two value_noise calls as warp offsets
+                    let xi0 = floor(vx); let yi0 = floor(vy);
+                    let fx0 = vx - xi0; let fy0 = vy - yi0;
+                    let wx = mix(mix(sin(xi0*127.1+yi0*311.3), sin((xi0+1.0)*127.1+yi0*311.3), fx0),
+                                 mix(sin(xi0*127.1+(yi0+1.0)*311.3), sin((xi0+1.0)*127.1+(yi0+1.0)*311.3), fx0), fy0);
+                    let xi1 = floor(vy); let yi1 = floor(vx);
+                    let fx1 = vy - xi1; let fy1 = vx - yi1;
+                    let wy = mix(mix(sin(xi1*127.1+yi1*311.3), sin((xi1+1.0)*127.1+yi1*311.3), fx1),
+                                 mix(sin(xi1*127.1+(yi1+1.0)*311.3), sin((xi1+1.0)*127.1+(yi1+1.0)*311.3), fx1), fy1);
+                    // FBM at warped coordinates
+                    let wx2 = vx + wx;
+                    let wy2 = vy + wy;
+                    var value: f32 = 0.0;
+                    var amplitude: f32 = 1.0;
+                    var frequency: f32 = 1.0;
+                    var max_val: f32 = 0.0;
+                    for (var o: i32 = 0; o < max(1, min(8, octaves)); o += 1) {
+                        let sx = wx2 * frequency; let sy = wy2 * frequency;
+                        let xi = floor(sx); let yi = floor(sy);
+                        let fx = sx - xi; let fy = sy - yi;
+                        let fa = sin(xi * 127.1 + yi * 311.3);
+                        let fb = sin((xi + 1.0) * 127.1 + yi * 311.3);
+                        let fc = sin(xi * 127.1 + (yi + 1.0) * 311.3);
+                        let fd = sin((xi + 1.0) * 127.1 + (yi + 1.0) * 311.3);
+                        value += mix(mix(fa, fb, fx), mix(fc, fd, fx), fy) * amplitude;
+                        max_val += amplitude;
+                        amplitude *= 0.5;
+                        frequency *= 2.0;
+                    }
+                    if (max_val > 0.0) { result = value / max_val; } else { result = 0.0; }
+                } else { result = 0.0; }
+            }
+            case OP_SCALED_X { result = nx * instr.value; }
+            case OP_SCALED_Y { result = ny * instr.value; }
             default { result = 0.0; }
         }
 
@@ -449,7 +663,8 @@ fn evaluate(base_idx: u32, nx: f32, ny: f32, t: f32) -> f32 {
     // Return top of stack
     var raw: f32 = 0.0;
     if (sp > 0u) { raw = stack[sp - 1u]; }
-    return fract(fract(raw) + 1.0);
+    let bounded = tanh(raw * 0.05) * 20.0;  // identity for |raw|<10, soft-clamps beyond ±20
+    return fract(fract(bounded) + 1.0);
 }
 
 @compute @workgroup_size(16, 16)
@@ -494,8 +709,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let s = evaluate(sr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_s);
     let v = evaluate(vr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_v);
 
-    // Convert to RGB and output
-    let rgb = hsv_to_rgb(h, s, v);
+    // Convert to RGB and output — color space selected per-individual by the host.
+    let rgb = clamp(channels_to_rgb(output_info.color_model, h, s, v), vec3<f32>(0.0), vec3<f32>(1.0));
     let out_idx = global_id.y * output_info.width + global_id.x;
     output[out_idx] = vec4<f32>(rgb, 1.0);
 }

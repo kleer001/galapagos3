@@ -20,7 +20,7 @@ Both scripts install Rust if needed, clone the repo, and build. No admin rights 
 
 ## What it does
 
-Every image is a formula. Three independent expression trees control the hue, saturation, and brightness of every pixel. Roll a population of 16, pick the ones you like, and the system breeds the next generation through crossover and mutation.
+Every image is a formula. Three independent expression trees produce three channels per pixel, which are interpreted through a per-individual color model (HSV, RGB, HSL, CMY, or YUV) to become RGB. Roll a population of 16, pick the ones you like, and the system breeds the next generation through crossover and mutation — the color model itself is an evolvable trait, rarely flipping to a neighbor so strong lineages drift between color spaces.
 
 ## Running
 
@@ -62,7 +62,7 @@ genome/      →    evolution/    →    renderer/    →    ui/
 - **Genome**: expression trees flattened to 1024-instruction stack-machine bytecode for GPU upload
 - **Renderer**: single wgpu compute dispatch renders all 16 tiles; shader lives in `assets/shaders/compute.wgsl`
 - **Evolution**: 47 operators across terminals, unary, binary, and ternary arities; subtree crossover + two mutation modes
-- **Coloring**: three spatial trees (H, S, V) + three palette remap trees that reshape each channel's output range
+- **Coloring**: three spatial trees + three palette remap trees produce three `[0,1]` channels; a per-individual `color_model` id (0=HSV, 1=RGB, 2=HSL, 3=CMY, 4=YUV) selects the conversion to RGB. The id is inherited and rarely mutated (see `COLOR_MODEL_MUTATION_PROB` in `src/config.rs`)
 
 ## Stack
 

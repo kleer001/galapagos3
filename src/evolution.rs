@@ -1,6 +1,6 @@
 use crate::config;
 use crate::genome::{Genome, Instruction, OpCode, Node};
-use crate::genome::op::{op_def, Arity, OP_REGISTRY};
+use crate::genome::op::{op_def, weighted_choice, Arity, OpDef, OP_REGISTRY};
 use rand::Rng;
 
 // ============================================================================
@@ -15,6 +15,7 @@ pub const DEFAULT_MAX_TREE_DEPTH: usize = config::MAX_TREE_DEPTH;
 pub const DEFAULT_EXPRESSION_MUTATION_PROB: f64 = config::EXPRESSION_MUTATION_PROB;
 pub const DEFAULT_DROPOUT_PROB: f64 = config::DROPOUT_PROB;
 pub const DEFAULT_DUPLICATION_PROB: f64 = config::DUPLICATION_PROB;
+pub const DEFAULT_COLOR_MODEL_MUTATION_PROB: f64 = config::COLOR_MODEL_MUTATION_PROB;
 
 /// Runtime evolution parameters (can be modified during execution)
 #[derive(Clone, Copy)]
@@ -25,6 +26,7 @@ pub struct EvolutionParams {
     pub expression_mutation_prob: f64,
     pub dropout_prob: f64,
     pub duplication_prob: f64,
+    pub color_model_mutation_prob: f64,
 }
 
 impl Default for EvolutionParams {
@@ -36,8 +38,19 @@ impl Default for EvolutionParams {
             expression_mutation_prob: DEFAULT_EXPRESSION_MUTATION_PROB,
             dropout_prob: DEFAULT_DROPOUT_PROB,
             duplication_prob: DEFAULT_DUPLICATION_PROB,
+            color_model_mutation_prob: DEFAULT_COLOR_MODEL_MUTATION_PROB,
         }
     }
+}
+
+/// With probability `params.color_model_mutation_prob`, return a uniformly chosen
+/// color-model id *different* from `current`. Otherwise return `current` unchanged.
+pub fn mutate_color_model(current: u32, rng: &mut impl Rng, params: &EvolutionParams) -> u32 {
+    if config::NUM_COLOR_MODELS <= 1 { return current; }
+    if !rng.gen_bool(params.color_model_mutation_prob) { return current; }
+    let n = config::NUM_COLOR_MODELS;
+    let pick = rng.gen_range(0..n - 1);
+    if pick >= current { pick + 1 } else { pick }
 }
 
 pub fn mutate(genome: &Genome, rng: &mut impl Rng) -> Genome {
@@ -295,22 +308,21 @@ enum MutationContext {
 
 fn random_op_same_arity(current: OpCode, context: MutationContext, rng: &mut impl Rng) -> Option<OpCode> {
     let current_arity = op_def(current).arity;
-    let candidates: Vec<OpCode> = OP_REGISTRY.iter()
+    let candidates: Vec<&OpDef> = OP_REGISTRY.iter()
         .filter(|def| {
             if def.opcode == current { return false; }
             if def.arity != current_arity { return false; }
             match context {
                 MutationContext::Spatial => def.opcode != OpCode::PaletteT,
-                MutationContext::Palette => !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::MirrorX | OpCode::MirrorY),
+                MutationContext::Palette => !matches!(def.opcode, OpCode::X | OpCode::Y | OpCode::MirrorX | OpCode::MirrorY | OpCode::ScaledX | OpCode::ScaledY),
             }
         })
-        .map(|def| def.opcode)
         .collect();
 
     if candidates.is_empty() {
         None
     } else {
-        Some(candidates[rng.gen_range(0..candidates.len())])
+        Some(weighted_choice(&candidates, rng).opcode)
     }
 }
 
@@ -322,8 +334,11 @@ fn expression_mutate_node(node: &mut Node, prob: f64, context: MutationContext, 
             if new_op == OpCode::Const {
                 node.value = rng.gen::<f32>();
             }
-            if new_op == OpCode::FBM {
+            if matches!(new_op, OpCode::FBM | OpCode::Turbulence | OpCode::Ridged | OpCode::Billow | OpCode::DomainWarp) {
                 node.c_literal = rng.gen_range(1..=6);
+            }
+            if matches!(new_op, OpCode::ScaledX | OpCode::ScaledY) {
+                node.value = 10_f32.powf(rng.gen_range(-1.0_f32..=1.0_f32));
             }
         }
     }
@@ -778,6 +793,26 @@ mod tests {
             let size = count_nodes(&tree);
             assert!(size <= config::MAX_TREE_SIZE,
                 "Duplication exceeded MAX_TREE_SIZE: {}", size);
+        }
+    }
+
+    // ── Color-model mutation tests ───────────────────────────────────────────
+
+    #[test]
+    fn mutate_color_model_stays_in_range_and_changes_when_it_fires() {
+        let mut rng = rand::thread_rng();
+        let always = EvolutionParams { color_model_mutation_prob: 1.0, ..Default::default() };
+        let never  = EvolutionParams { color_model_mutation_prob: 0.0, ..Default::default() };
+
+        for current in 0..config::NUM_COLOR_MODELS {
+            for _ in 0..200 {
+                let next = mutate_color_model(current, &mut rng, &always);
+                assert!(next < config::NUM_COLOR_MODELS, "out of range: {}", next);
+                assert_ne!(next, current, "mutation must change the id when it fires");
+
+                let same = mutate_color_model(current, &mut rng, &never);
+                assert_eq!(same, current, "prob=0 must never change");
+            }
         }
     }
 

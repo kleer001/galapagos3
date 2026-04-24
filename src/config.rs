@@ -97,6 +97,13 @@ pub const PALETTE_MIN_RANGE: f32 = 0.05;
 pub const MIN_CHANNEL_RANGE: f32 = 0.05;
 pub const MIN_CHANNEL_MEAN: f32 = 0.05;
 
+/// Number of supported color-space models for interpreting the three output channels.
+/// Ids: 0=HSV, 1=RGB, 2=HSL, 3=CMY, 4=YUV (BT.601).
+pub const NUM_COLOR_MODELS: u32 = 5;
+
+/// Per-offspring probability of switching to a different random color model.
+pub const COLOR_MODEL_MUTATION_PROB: f64 = 0.03;
+
 // ============================================================================
 // UI LAYOUT
 // ============================================================================
