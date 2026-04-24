@@ -43,6 +43,29 @@ impl Default for EvolutionParams {
     }
 }
 
+/// Sample a target tree depth, capped at `max_cap`, from a low-frequency-biased
+/// distribution: depths 1..=9 each get weight 1, then 10→0.5, 11→0.25, 12→0.125,
+/// 13→0.0625 (total ≈ 9.94). Deep trees compose more frequencies, so halving
+/// the weight every step past 9 keeps most genomes in the smooth regime while
+/// still allowing occasional complex individuals.
+pub fn sample_tree_depth(rng: &mut impl Rng, max_cap: usize) -> usize {
+    const WEIGHTS: [(usize, f32); 13] = [
+        (1,  1.0),    (2,  1.0),    (3,  1.0),    (4,  1.0),    (5,  1.0),
+        (6,  1.0),    (7,  1.0),    (8,  1.0),    (9,  1.0),
+        (10, 0.5),    (11, 0.25),   (12, 0.125),  (13, 0.0625),
+    ];
+    let total: f32 = WEIGHTS.iter()
+        .filter(|(d, _)| *d <= max_cap)
+        .map(|(_, w)| *w).sum();
+    let mut r: f32 = rng.gen::<f32>() * total;
+    for (d, w) in WEIGHTS.iter() {
+        if *d > max_cap { break; }
+        r -= *w;
+        if r <= 0.0 { return *d; }
+    }
+    max_cap.min(13)
+}
+
 /// With probability `params.color_model_mutation_prob`, return a uniformly chosen
 /// color-model id *different* from `current`. Otherwise return `current` unchanged.
 pub fn mutate_color_model(current: u32, rng: &mut impl Rng, params: &EvolutionParams) -> u32 {
@@ -99,7 +122,7 @@ fn mutate_subtree_with_params(node: &Node, rng: &mut impl Rng, params: &Evolutio
                 match rng.gen_range(0..3) {
                     0 => result.children[0] = mutate_subtree_with_params(&node.children[0], rng, params),
                     1 => result.children[1] = mutate_subtree_with_params(&node.children[1], rng, params),
-                    _ => result.c_literal = rng.gen_range(1..=8),
+                    _ => result.c_literal = rng.gen_range(1..=4),
                 }
             } else if rng.gen_bool(params.binary_child_side_prob) {
                 result.children[0] = mutate_subtree_with_params(&node.children[0], rng, params);
@@ -335,10 +358,10 @@ fn expression_mutate_node(node: &mut Node, prob: f64, context: MutationContext, 
                 node.value = rng.gen::<f32>();
             }
             if matches!(new_op, OpCode::FBM | OpCode::Turbulence | OpCode::Ridged | OpCode::Billow | OpCode::DomainWarp) {
-                node.c_literal = rng.gen_range(1..=6);
+                node.c_literal = rng.gen_range(1..=4);
             }
             if matches!(new_op, OpCode::ScaledX | OpCode::ScaledY) {
-                node.value = 10_f32.powf(rng.gen_range(-1.0_f32..=1.0_f32));
+                node.value = 10_f32.powf(rng.gen_range(-0.5_f32..=0.5_f32));
             }
         }
     }
@@ -794,6 +817,35 @@ mod tests {
             assert!(size <= config::MAX_TREE_SIZE,
                 "Duplication exceeded MAX_TREE_SIZE: {}", size);
         }
+    }
+
+    // ── Depth sampler tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn sample_tree_depth_respects_cap_and_distribution() {
+        let mut rng = rand::thread_rng();
+        // Cap respected.
+        for cap in 1..=13 {
+            for _ in 0..200 {
+                let d = sample_tree_depth(&mut rng, cap);
+                assert!(d >= 1 && d <= cap, "depth {} out of [1,{}]", d, cap);
+            }
+        }
+        // At cap=13, buckets 1..=9 should each appear more often than any of 10..=13.
+        let mut counts = [0usize; 14];
+        let n = 200_000;
+        for _ in 0..n {
+            counts[sample_tree_depth(&mut rng, 13)] += 1;
+        }
+        // Every "even" bucket (1..=9) should outnumber the fall-off bucket 10.
+        for d in 1..=9 {
+            assert!(counts[d] > counts[10],
+                "bucket {} ({}) should outnumber bucket 10 ({})", d, counts[d], counts[10]);
+        }
+        // Halving pattern: 10 > 11 > 12 > 13. Use slack since samples are noisy.
+        assert!(counts[10] > counts[11]);
+        assert!(counts[11] > counts[12]);
+        assert!(counts[12] > counts[13]);
     }
 
     // ── Color-model mutation tests ───────────────────────────────────────────

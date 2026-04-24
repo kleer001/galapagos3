@@ -50,8 +50,10 @@ pub const SEL_COLOR: (f32, f32, f32) = (1.0, 0.53, 0.0);
 // TREE GENERATION LIMITS
 // ============================================================================
 
-/// Tree generation limits for random genome initialization.
-pub const MAX_TREE_DEPTH: usize = 18;
+/// Hard upper cap on random-genome depth. The actual depth is sampled from a
+/// low-frequency-biased distribution (see `evolution::sample_tree_depth`) —
+/// 1..=9 uniform, then halving weights at 10, 11, 12, 13.
+pub const MAX_TREE_DEPTH: usize = 13;
 pub const MIN_TREE_SIZE: usize = 6;
 pub const MAX_TREE_SIZE: usize = 1024;
 /// Minimum depth before leaves (terminals / Nullary ops) are allowed during generation.

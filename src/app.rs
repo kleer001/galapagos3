@@ -109,23 +109,27 @@ pub struct Individual {
 }
 
 fn make_spatial_genome(rng: &mut impl Rng, max_depth: usize) -> Genome {
-    let mut candidate = Genome::new(Node::random_with_depth(rng, max_depth));
+    let depth = evolution::sample_tree_depth(rng, max_depth);
+    let mut candidate = Genome::new(Node::random_with_depth(rng, depth));
     for _ in 0..9 {
         if candidate.instructions.iter().any(|i| matches!(i.op, OpCode::X | OpCode::Y)) {
             return candidate;
         }
-        candidate = Genome::new(Node::random_with_depth(rng, max_depth));
+        let d = evolution::sample_tree_depth(rng, max_depth);
+        candidate = Genome::new(Node::random_with_depth(rng, d));
     }
     candidate
 }
 
 fn make_palette_genome(rng: &mut impl Rng, max_depth: usize) -> Genome {
-    let mut candidate = Genome::new(Node::random_palette_with_depth(rng, max_depth));
+    let depth = evolution::sample_tree_depth(rng, max_depth);
+    let mut candidate = Genome::new(Node::random_palette_with_depth(rng, depth));
     for _ in 0..9 {
         if candidate.palette_range() >= config::PALETTE_MIN_RANGE {
             return candidate;
         }
-        candidate = Genome::new(Node::random_palette_with_depth(rng, max_depth));
+        let d = evolution::sample_tree_depth(rng, max_depth);
+        candidate = Genome::new(Node::random_palette_with_depth(rng, d));
     }
     candidate
 }
@@ -784,7 +788,7 @@ impl eframe::App for App {
                         .range(0..=(config::POP_SIZE / 2))
                         .prefix("FreshRand: "));
                     ui.add(egui::DragValue::new(&mut self.rt_config.max_tree_depth)
-                        .range(1..=15usize)
+                        .range(1..=13usize)
                         .prefix("MaxDepth: "));
                 });
         }

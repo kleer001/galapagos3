@@ -49,6 +49,8 @@ WINIT_UNIX_BACKEND=x11 cargo run
 
 See **[kleer001.github.io/galapagos3/genome-explainer.html](https://kleer001.github.io/galapagos3/genome-explainer.html)** — an interactive guide that walks through building blocks, tree growth, pixel evaluation, HSV coloring, channel remapping, and evolution with live animations.
 
+For the biases baked into random generation and mutation — why populations default to low-frequency, smooth compositions — see [`docs/expression-generation.md`](docs/expression-generation.md).
+
 ## Architecture
 
 ```

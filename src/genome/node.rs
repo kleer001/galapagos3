@@ -47,7 +47,7 @@ impl Node {
             _ => {
                 let op = if rng.gen_bool(0.5) { OpCode::ScaledX } else { OpCode::ScaledY };
                 let mut n = Node::terminal(op);
-                n.value = 10_f32.powf(rng.gen_range(-1.0_f32..=1.0_f32));
+                n.value = 10_f32.powf(rng.gen_range(-0.5_f32..=0.5_f32));
                 n
             }
         }
@@ -84,7 +84,7 @@ impl Node {
             Arity::Nullary => {
                 let mut node = Node::terminal(def.opcode);
                 if matches!(def.opcode, OpCode::ScaledX | OpCode::ScaledY) {
-                    node.value = 10_f32.powf(rng.gen_range(-1.0_f32..=1.0_f32));
+                    node.value = 10_f32.powf(rng.gen_range(-0.5_f32..=0.5_f32));
                 }
                 node
             }
@@ -98,7 +98,7 @@ impl Node {
                 let b = Self::random_bounded(rng, max_depth - 1, budget, next_min);
                 if matches!(def.opcode, OpCode::FBM | OpCode::Turbulence | OpCode::Ridged | OpCode::Billow | OpCode::DomainWarp) {
                     let mut node = Node::binary(def.opcode, a, b);
-                    node.c_literal = rng.gen_range(1..=6);
+                    node.c_literal = rng.gen_range(1..=4);
                     return node;
                 }
                 Node::binary(def.opcode, a, b)
@@ -197,7 +197,7 @@ impl Node {
                 let b = Self::random_palette_bounded(rng, max_depth - 1, budget, next_min);
                 if matches!(def.opcode, OpCode::FBM | OpCode::Turbulence | OpCode::Ridged | OpCode::Billow | OpCode::DomainWarp) {
                     let mut node = Node::binary(def.opcode, a, b);
-                    node.c_literal = rng.gen_range(1..=6);
+                    node.c_literal = rng.gen_range(1..=4);
                     return node;
                 }
                 Node::binary(def.opcode, a, b)
