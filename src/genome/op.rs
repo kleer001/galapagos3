@@ -244,9 +244,12 @@ fn eval_fbm(vx: f32, vy: f32, octaves: i32) -> f32 {
 // Weights are a low-frequency bias prior: smooth composing ops (Sin, Cos, Mix,
 // Smoothstep, Tanh, Add/Sub) are boosted; hard-discontinuity ops (Fract, Mod,
 // Floor, Sign, Step, Tan, Reciprocal) and explosive ops (Exp, Pow, Div, Sinh,
-// Cosh) are dropped. Noise variants are kept but below 1.0 so they no longer
-// dominate populations. Raw X/Y and Mirror terminals are boosted so shallow
-// genomes have a real chance of picking smooth coord inputs.
+// Cosh) are dropped. Coherent feature generators (SimplexNoise, FBM,
+// DomainWarp, Chebyshev) are at parity with smooth composers so populations
+// get fractal/wibbly structure; noise variants (Ridged/Billow/Turbulence,
+// Worley/Manhattan) sit mid-tier to add variety without dominating. Raw X/Y
+// and Mirror terminals are boosted so shallow genomes have a real chance of
+// picking smooth coord inputs.
 pub static OP_REGISTRY: [OpDef; 52] = [
     // Phase 1: Core
     OpDef { opcode: OpCode::X,          name: "X",          arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_x),              weight: 1.5 },
@@ -284,25 +287,25 @@ pub static OP_REGISTRY: [OpDef; 52] = [
     OpDef { opcode: OpCode::Reciprocal, name: "Reciprocal", arity: Arity::Unary,    eval: EvalFn::Unary(eval_reciprocal),       weight: 0.3 },
     OpDef { opcode: OpCode::Invert,     name: "Invert",     arity: Arity::Unary,    eval: EvalFn::Unary(eval_invert),           weight: 0.5 },
     // Phase 3: Noise & spatial
-    OpDef { opcode: OpCode::ValueNoise, name: "ValueNoise", arity: Arity::Binary,   eval: EvalFn::Binary(eval_value_noise),     weight: 0.8 },
-    OpDef { opcode: OpCode::FBM,        name: "FBM",        arity: Arity::Binary,   eval: EvalFn::BinaryLiteral(eval_fbm),      weight: 0.8 },
+    OpDef { opcode: OpCode::ValueNoise, name: "ValueNoise", arity: Arity::Binary,   eval: EvalFn::Binary(eval_value_noise),     weight: 1.0 },
+    OpDef { opcode: OpCode::FBM,        name: "FBM",        arity: Arity::Binary,   eval: EvalFn::BinaryLiteral(eval_fbm),      weight: 1.5 },
     OpDef { opcode: OpCode::MirrorX,    name: "MirrorX",    arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_mirror_x),       weight: 1.5 },
     OpDef { opcode: OpCode::MirrorY,    name: "MirrorY",    arity: Arity::Nullary,  eval: EvalFn::Nullary(eval_mirror_y),       weight: 1.5 },
     // Extended operators
     OpDef { opcode: OpCode::Atan2,      name: "Atan2",      arity: Arity::Binary,   eval: EvalFn::Binary(eval_atan2),           weight: 1.0 },
     OpDef { opcode: OpCode::Mod,        name: "Mod",        arity: Arity::Binary,   eval: EvalFn::Binary(eval_mod),             weight: 0.3 },
-    OpDef { opcode: OpCode::Worley,     name: "Worley",     arity: Arity::Binary,   eval: EvalFn::Binary(eval_worley),          weight: 0.5 },
+    OpDef { opcode: OpCode::Worley,     name: "Worley",     arity: Arity::Binary,   eval: EvalFn::Binary(eval_worley),          weight: 0.8 },
     OpDef { opcode: OpCode::TriWave,    name: "TriWave",    arity: Arity::Unary,    eval: EvalFn::Unary(eval_triwave),          weight: 0.5 },
-    OpDef { opcode: OpCode::Chebyshev,  name: "Chebyshev",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_chebyshev),       weight: 0.5 },
-    OpDef { opcode: OpCode::Manhattan,  name: "Manhattan",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_manhattan),       weight: 0.5 },
+    OpDef { opcode: OpCode::Chebyshev,  name: "Chebyshev",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_chebyshev),       weight: 1.2 },
+    OpDef { opcode: OpCode::Manhattan,  name: "Manhattan",  arity: Arity::Binary,   eval: EvalFn::Binary(eval_manhattan),       weight: 0.8 },
     OpDef { opcode: OpCode::SinFold,    name: "SinFold",    arity: Arity::Unary,    eval: EvalFn::Unary(eval_sinfold),          weight: 0.5 },
     OpDef { opcode: OpCode::PaletteT,   name: "PaletteT",   arity: Arity::Nullary,  eval: EvalFn::PaletteTVal,                  weight: 1.0 },
     // Noise variants
-    OpDef { opcode: OpCode::Turbulence,  name: "Turbulence",  arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_turbulence),  weight: 0.8 },
-    OpDef { opcode: OpCode::Ridged,      name: "Ridged",      arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_ridged),      weight: 0.5 },
-    OpDef { opcode: OpCode::Billow,      name: "Billow",      arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_billow),      weight: 0.5 },
-    OpDef { opcode: OpCode::SimplexNoise,name: "SimplexNoise",arity: Arity::Binary, eval: EvalFn::Binary(eval_simplex_noise),      weight: 0.8 },
-    OpDef { opcode: OpCode::DomainWarp,  name: "DomainWarp",  arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_domain_warp), weight: 0.8 },
+    OpDef { opcode: OpCode::Turbulence,  name: "Turbulence",  arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_turbulence),  weight: 1.0 },
+    OpDef { opcode: OpCode::Ridged,      name: "Ridged",      arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_ridged),      weight: 1.0 },
+    OpDef { opcode: OpCode::Billow,      name: "Billow",      arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_billow),      weight: 1.0 },
+    OpDef { opcode: OpCode::SimplexNoise,name: "SimplexNoise",arity: Arity::Binary, eval: EvalFn::Binary(eval_simplex_noise),      weight: 1.5 },
+    OpDef { opcode: OpCode::DomainWarp,  name: "DomainWarp",  arity: Arity::Binary, eval: EvalFn::BinaryLiteral(eval_domain_warp), weight: 1.5 },
     OpDef { opcode: OpCode::ScaledX,     name: "ScaledX",     arity: Arity::Nullary, eval: EvalFn::Nullary(eval_scaled_x),           weight: 1.0 },
     OpDef { opcode: OpCode::ScaledY,     name: "ScaledY",     arity: Arity::Nullary, eval: EvalFn::Nullary(eval_scaled_y),           weight: 1.0 },
 ];
