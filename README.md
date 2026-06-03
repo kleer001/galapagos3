@@ -29,6 +29,13 @@ cargo run          # dev build
 cargo run --release  # full speed
 ```
 
+Or use the launcher scripts, which set the Linux X11 backend and build in release:
+
+```bash
+./run-gui.sh       # the interactive breeder
+./run-widget.sh    # the animated desktop widget (see below)
+```
+
 On Linux, if the window fails to open:
 
 ```bash
@@ -44,6 +51,37 @@ WINIT_UNIX_BACKEND=x11 cargo run
 | Z (hover) or double-click | Zoom tile to 1:1 at full 1920×1080 |
 | Escape | Exit zoom |
 | S | Save selected tile + its expression strings |
+
+## Animated widget
+
+A second binary, `widget`, is a small always-on-top window that brings a saved
+genome to life:
+
+```bash
+cargo run --bin widget [-- <genome_dir>]   # defaults to ./output
+./run-widget.sh [<genome_dir>]              # release build + X11 backend
+```
+
+It loads `.gal` specimen files (written by the main app's `S` save) and animates
+one via a **genetic walk**: it continuously nudges the genome's numeric values —
+constants and coordinate scales — within a bounded neighborhood of the saved
+seed, while leaving the expression *structure* untouched. Every frame is therefore
+a real, sharp genome that deforms organically, never a cross-dissolve. Each value
+wanders on its own staggered clock (independent speed and phase offset), so the
+motion is continuous and never globally pauses.
+
+Rendering tracks the window's native resolution — resize to scale the art up to
+~4K (1:1, no upscaling blur). Use `⏮`/`⏭` to re-seed from the previous/next saved
+genome.
+
+Preferences (`⚙`):
+
+| Slider | Effect |
+|---|---|
+| seconds per waypoint | wander cadence — higher is slower, more languid |
+| drift amount | how far each value strays from its seed (±) |
+| speed spread | spread of per-parameter clock speeds |
+| phase spread | parameter desync — low values pulse together, high values scatter into continuous flow |
 
 ## How it works
 

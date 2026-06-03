@@ -90,8 +90,7 @@ pub struct OutputInfo {
     pub jitter_y: f32,
     /// Color-space id (see config::NUM_COLOR_MODELS). The shader dispatches on this.
     pub color_model: u32,
-    /// Animation clock in seconds. The shader drifts the sample field by this;
-    /// 0.0 is an exact identity (interactive grid and save renders pass 0.0).
+    /// Unused by the bytecode shader; retained for buffer-layout stability.
     pub time: f32,
 }
 
@@ -100,8 +99,6 @@ pub struct OutputInfo {
 // ============================================================================
 
 pub struct GpuRenderer {
-    #[allow(dead_code)]
-    instance: wgpu::Instance,
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
@@ -140,22 +137,28 @@ impl GpuRenderer {
             .await
             .map_err(|e| RenderError::Wgpu(e.to_string()))?;
 
+        Self::from_device(device, queue)
+    }
+
+    /// Build a renderer on an existing device/queue (e.g. shared with eframe's
+    /// wgpu backend). Creating a *second* wgpu device in the same process makes
+    /// compute submissions silently produce all-zero output, so GUI hosts must
+    /// reuse their own device rather than calling `new()`.
+    pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> RenderResult<Self> {
         // Load and create shader module with injected constants from build.rs
         let mut shader_source = std::fs::read_to_string("assets/shaders/compute.wgsl")
             .map_err(|e| RenderError::ShaderLoad(format!("Failed to load shader: {}", e)))?;
 
-        // Try to include generated constants from build.rs (if available)
-        // The build script generates wgsl_constants.wgsl in OUT_DIR
-        if let Ok(constants_content) = std::env::var("WGSL_CONSTANTS_PATH") {
-            if let Ok(constants) = std::fs::read_to_string(&constants_content) {
-                // Replace the hardcoded constants section with generated ones
-                shader_source = shader_source
-                    .replace(
-                        "// Maximum stack depth for interpreter (auto-generated from config.rs)\nconst MAX_STACK: u32 = 256;\n// Instructions per genome (auto-generated from config.rs)\nconst INSTRUCTIONS_PER_GENOME: u32 = 256;",
-                        &constants.trim_start()
-                    );
-            }
-        }
+        // Inject the constants generated from config.rs by build.rs. These are
+        // baked in at compile time (not read from a runtime env var), so the
+        // binary renders correctly whether launched via `cargo run` or directly.
+        // Without this the shader's hardcoded fallback stride mismatches the
+        // host-side genome packing and every render comes out blank.
+        let constants = include_str!(concat!(env!("OUT_DIR"), "/wgsl_constants.wgsl"));
+        shader_source = shader_source.replace(
+            "// Maximum stack depth for interpreter (auto-generated from config.rs)\nconst MAX_STACK: u32 = 256;\n// Instructions per genome (auto-generated from config.rs)\nconst INSTRUCTIONS_PER_GENOME: u32 = 256;",
+            constants.trim_start(),
+        );
 
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Compute Shader"),
@@ -216,7 +219,6 @@ impl GpuRenderer {
         });
 
         Ok(Self {
-            instance,
             device,
             queue,
             pipeline,
@@ -451,13 +453,13 @@ impl GpuRenderer {
             (render_size * std::mem::size_of::<[f32; 4]>()) as u64,
         );
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        let submission = self.queue.submit(std::iter::once(encoder.finish()));
 
         // Read back results
         let buffer_slice = readback_buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
 
-        self.device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }).expect("GPU poll failed");
+        self.device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: None }).expect("GPU poll failed");
 
         let guard = buffer_slice.get_mapped_range();
         let data: &[f32] = bytemuck::cast_slice(&guard);

@@ -1,16 +1,18 @@
 //! Galápagos animated desktop widget.
 //!
-//! A small always-on-top window that cycles through a library of saved `.gal`
-//! genomes (written by the main app's per-tile save), rendering each with a
-//! slowly drifting coordinate field so the still patterns swirl. The genome
-//! advances on a timer; the interval and source directory are preferences.
+//! A small always-on-top window that animates a saved `.gal` genome by a
+//! *genetic walk*: it perturbs the genome's numeric values (constants, coordinate
+//! scales) a little at a time and morphs between them, while the expression
+//! structure stays fixed. Every frame is therefore a real, sharp genome that
+//! deforms organically around the seed — never a dissolve. ⏭/⏮ re-seed from the
+//! next/previous library genome; wander cadence, drift amount, and source
+//! directory are preferences.
 //!
 //! Run from the repo root (the renderer loads `assets/shaders/compute.wgsl`
 //! relative to the working directory):
 //!     cargo run --bin widget [-- <genome_dir>]   # defaults to ./output
 
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use eframe::egui;
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
@@ -19,7 +21,35 @@ use galapagos3::specimen::{self, Specimen};
 
 const WIDGET_W: u32 = 640;
 const WIDGET_H: u32 = 480;
-const DEFAULT_INTERVAL: f32 = 5.0;
+/// Per-dimension and total caps on render resolution. The total keeps the RGBA-f32
+/// render buffer under wgpu's default 128 MiB storage-buffer limit (4K just fits).
+const MAX_RENDER_DIM: u32 = 3840;
+const MAX_RENDER_PIXELS: u32 = 8_000_000;
+
+/// Clamp a desired physical render size to the caps, scaling both dimensions down
+/// proportionally if the pixel budget is exceeded.
+fn clamp_render_size(w: u32, h: u32) -> (u32, u32) {
+    let w = w.clamp(64, MAX_RENDER_DIM);
+    let h = h.clamp(64, MAX_RENDER_DIM);
+    let total = w as u64 * h as u64;
+    if total <= MAX_RENDER_PIXELS as u64 {
+        return (w, h);
+    }
+    let scale = (MAX_RENDER_PIXELS as f64 / total as f64).sqrt();
+    (
+        ((w as f64 * scale) as u32).max(64),
+        ((h as f64 * scale) as u32).max(64),
+    )
+}
+/// Average seconds between a parameter's waypoints (its wander cadence).
+const DEFAULT_CADENCE: f32 = 4.0;
+/// Default wander amplitude — how far each `value` strays from its seed (±).
+const DEFAULT_DRIFT: f32 = 0.4;
+/// Default spread of per-parameter clock speeds (desync via differing rates).
+const DEFAULT_SPEED_SPREAD: f32 = 0.8;
+/// Default spread of per-parameter phase offsets (desync at t=0; near 0 the
+/// parameters pulse together, higher values scatter them into continuous flow).
+const DEFAULT_PHASE_SPREAD: f32 = 4.0;
 
 type Raw = Vec<(u32, i32, i32, i32, f32)>;
 
@@ -39,6 +69,59 @@ impl Loaded {
             color_model: spec.color_model,
         }
     }
+}
+
+/// One genome's six channels of GPU instruction tuples.
+type Channels = [Raw; specimen::CHANNEL_COUNT];
+
+/// Deterministic hash of two integers to a float in [-1, 1].
+fn hash(a: u32, b: u32) -> f32 {
+    let mut h = a.wrapping_mul(0x1657_4b0d).wrapping_add(b.wrapping_mul(0x27d4_eb2f));
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 13;
+    (h as f32 / u32::MAX as f32) * 2.0 - 1.0
+}
+
+/// Smooth 1-D value noise for parameter `idx` at position `u` (u ≥ 0): random
+/// waypoints at integer steps, smoothstep-interpolated. Result in [-1, 1].
+fn value_noise(idx: u32, u: f32) -> f32 {
+    let k = u.floor();
+    let f = u - k;
+    let k = k as u32;
+    let a = hash(idx, k);
+    let b = hash(idx, k.wrapping_add(1));
+    let s = f * f * (3.0 - 2.0 * f);
+    a + (b - a) * s
+}
+
+/// Build the live genome at time `clock` (seconds): every instruction `value`
+/// wanders smoothly within ±`drift` of its seed, each on its own clock (a per-
+/// parameter speed and phase offset). The staggering means parameters are never
+/// synchronized — at any instant some are easing in, some out — so the motion
+/// never globally stops, and structure is untouched (always a sharp genome).
+fn walk_frame(
+    seed: &Channels,
+    clock: f32,
+    drift: f32,
+    cadence: f32,
+    speed_spread: f32,
+    phase_spread: f32,
+) -> Channels {
+    let rate = 1.0 / cadence.max(0.1);
+    std::array::from_fn(|c| {
+        seed[c]
+            .iter()
+            .enumerate()
+            .map(|(j, &(op, a, b, cc, vs))| {
+                let idx = (c as u32).wrapping_mul(100_003).wrapping_add(j as u32);
+                let speed = 0.6 + (hash(idx, 0x5) * 0.5 + 0.5) * speed_spread;
+                let offset = (hash(idx, 0x9) * 0.5 + 0.5) * phase_spread;
+                let u = clock * rate * speed + offset;
+                (op, a, b, cc, vs + drift * value_noise(idx, u))
+            })
+            .collect()
+    })
 }
 
 fn load_library(dir: &Path) -> Vec<Loaded> {
@@ -75,17 +158,38 @@ struct Widget {
     dir: PathBuf,
     library: Vec<Loaded>,
     idx: usize,
-    genome_start: Instant,
-    interval: f32,
+    /// The library genome the walk wanders around.
+    seed: Channels,
+    color_model: u32,
+    /// Ever-increasing wall-clock seconds driving the per-parameter wander.
+    clock: f32,
+    cadence: f32,
+    drift: f32,
+    speed_spread: f32,
+    phase_spread: f32,
+    /// Physical pixel size to render at — tracks the display area each frame.
+    render_w: u32,
+    render_h: u32,
     paused: bool,
     show_prefs: bool,
     tex: Option<TextureHandle>,
 }
 
+fn empty_channels() -> Channels {
+    std::array::from_fn(|_| Vec::new())
+}
+
 impl Widget {
-    fn new(dir: PathBuf) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, dir: PathBuf) -> Self {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-        let gpu = rt.block_on(GpuRenderer::new()).expect("GPU init failed");
+        // Reuse eframe's wgpu device — a second device in-process makes compute
+        // readback return all zeros. See GpuRenderer::from_device.
+        let rs = cc
+            .wgpu_render_state
+            .as_ref()
+            .expect("widget requires the wgpu render backend");
+        let gpu = GpuRenderer::from_device(rs.device.clone(), rs.queue.clone())
+            .expect("GPU init failed");
         let library = load_library(&dir);
         if library.is_empty() {
             eprintln!(
@@ -93,18 +197,39 @@ impl Widget {
                 dir.display()
             );
         }
-        Self {
+        let mut w = Self {
             rt,
             gpu,
             dir,
             library,
             idx: 0,
-            genome_start: Instant::now(),
-            interval: DEFAULT_INTERVAL,
+            seed: empty_channels(),
+            color_model: 0,
+            clock: 0.0,
+            cadence: DEFAULT_CADENCE,
+            drift: DEFAULT_DRIFT,
+            speed_spread: DEFAULT_SPEED_SPREAD,
+            phase_spread: DEFAULT_PHASE_SPREAD,
+            render_w: WIDGET_W,
+            render_h: WIDGET_H,
             paused: false,
             show_prefs: false,
             tex: None,
+        };
+        w.reseed();
+        w
+    }
+
+    /// Anchor the walk on the current library genome: it becomes the seed the
+    /// per-parameter wander revolves around.
+    fn reseed(&mut self) {
+        if self.library.is_empty() {
+            return;
         }
+        let g = &self.library[self.idx];
+        self.seed = g.channels.clone();
+        self.color_model = g.color_model;
+        self.clock = 0.0;
     }
 
     fn step(&mut self, delta: isize) {
@@ -113,33 +238,11 @@ impl Widget {
         }
         let n = self.library.len() as isize;
         self.idx = (((self.idx as isize + delta) % n + n) % n) as usize;
-        self.genome_start = Instant::now();
+        self.reseed();
     }
 
-    fn render_current(&mut self, ctx: &Context) {
-        let t = self.genome_start.elapsed().as_secs_f32();
-        let cur = &self.library[self.idx];
-        let c = &cur.channels;
-        let result = self.rt.block_on(self.gpu.render_animated(
-            &c[0],
-            &c[1],
-            &c[2],
-            &c[3],
-            &c[4],
-            &c[5],
-            WIDGET_W,
-            WIDGET_H,
-            1,
-            cur.color_model,
-            t,
-        ));
-        let pixels = match result {
-            Ok(px) => px,
-            Err(e) => {
-                eprintln!("render failed: {e}");
-                return;
-            }
-        };
+    /// Upload packed pixels to the display texture.
+    fn upload(&mut self, ctx: &Context, pixels: &[u32]) {
         let rgba: Vec<u8> = pixels
             .iter()
             .flat_map(|&p| {
@@ -151,8 +254,35 @@ impl Widget {
                 ]
             })
             .collect();
-        let img = ColorImage::from_rgba_unmultiplied([WIDGET_W as usize, WIDGET_H as usize], &rgba);
+        let img = ColorImage::from_rgba_unmultiplied(
+            [self.render_w as usize, self.render_h as usize],
+            &rgba,
+        );
         self.tex = Some(ctx.load_texture("widget", img, TextureOptions::LINEAR));
+    }
+
+    /// Advance the wall-clock and render the current frame. Every parameter
+    /// wanders smoothly around its seed on its own staggered clock, so the
+    /// motion is continuous and never globally stops. Always a sharp genome.
+    fn tick(&mut self, ctx: &Context) {
+        if !self.paused {
+            self.clock += ctx.input(|i| i.stable_dt).min(0.1);
+        }
+        let frame = walk_frame(
+            &self.seed,
+            self.clock,
+            self.drift,
+            self.cadence,
+            self.speed_spread,
+            self.phase_spread,
+        );
+        match self.rt.block_on(self.gpu.render_animated(
+            &frame[0], &frame[1], &frame[2], &frame[3], &frame[4], &frame[5],
+            self.render_w, self.render_h, 1, self.color_model, 0.0,
+        )) {
+            Ok(px) => self.upload(ctx, &px),
+            Err(e) => eprintln!("render failed: {e}"),
+        }
     }
 }
 
@@ -160,15 +290,8 @@ impl eframe::App for Widget {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        if !self.paused
-            && !self.library.is_empty()
-            && self.genome_start.elapsed().as_secs_f32() >= self.interval
-        {
-            self.step(1);
-        }
-
         if !self.library.is_empty() {
-            self.render_current(&ctx);
+            self.tick(&ctx);
         }
 
         egui::Panel::top("controls").show_inside(ui, |ui| {
@@ -205,14 +328,23 @@ impl eframe::App for Widget {
                 .collapsible(false)
                 .show(&ctx, |ui| {
                     ui.add(
-                        egui::Slider::new(&mut self.interval, 1.0..=30.0)
-                            .text("seconds per genome"),
+                        egui::Slider::new(&mut self.cadence, 0.5..=15.0)
+                            .text("seconds per waypoint"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.drift, 0.05..=2.0).text("drift amount"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.speed_spread, 0.2..=4.0).text("speed spread"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.phase_spread, 0.2..=4.0).text("phase spread"),
                     );
                     ui.label(format!("source: {}", self.dir.display()));
                     if ui.button("⟳ Reload library").clicked() {
                         self.library = load_library(&self.dir);
                         self.idx = 0;
-                        self.genome_start = Instant::now();
+                        self.reseed();
                     }
                     if ui.button("Close").clicked() {
                         self.show_prefs = false;
@@ -221,8 +353,15 @@ impl eframe::App for Widget {
         }
 
         egui::CentralPanel::no_frame().show_inside(ui, |ui| {
+            let rect = ui.available_rect_before_wrap();
+            // Track the display area in physical pixels so the next frame renders
+            // at native resolution (1:1, sharp). Resizing the window resizes the art.
+            let ppp = ui.ctx().pixels_per_point();
+            let (rw, rh) =
+                clamp_render_size((rect.width() * ppp) as u32, (rect.height() * ppp) as u32);
+            self.render_w = rw;
+            self.render_h = rh;
             if let Some(tex) = &self.tex {
-                let rect = ui.available_rect_before_wrap();
                 ui.put(rect, egui::Image::new(tex).fit_to_exact_size(rect.size()));
             } else {
                 ui.centered_and_justified(|ui| {
@@ -245,6 +384,8 @@ fn main() {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([WIDGET_W as f32, WIDGET_H as f32 + 32.0])
+            .with_min_inner_size([240.0, 180.0])
+            .with_resizable(true)
             .with_title("Galápagos Widget")
             .with_always_on_top(),
         ..Default::default()
@@ -252,7 +393,7 @@ fn main() {
     eframe::run_native(
         "Galápagos Widget",
         options,
-        Box::new(move |_cc| Ok(Box::new(Widget::new(dir)))),
+        Box::new(move |cc| Ok(Box::new(Widget::new(cc, dir)))),
     )
     .unwrap();
 }

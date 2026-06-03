@@ -700,16 +700,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let nx = (f32(local_x) + output_info.jitter_x) / f32(tile_w) * 2.0 - 1.0;
     let ny = (f32(local_y) + output_info.jitter_y) / f32(tile_h) * 2.0 - 1.0;
 
-    // Animation: slowly rotate + breathe the sample field so time-less genomes
-    // swirl, like a camera gliding through the pattern. time == 0.0 collapses to
-    // an exact identity (ang=0, zoom=1), leaving grid/save renders untouched.
-    let ti = output_info.time;
-    let ang = ti * 0.15;
-    let zoom = 1.0 + 0.15 * sin(ti * 0.21);
-    let ca = cos(ang);
-    let sa = sin(ang);
-    let sx = (nx * ca - ny * sa) * zoom;
-    let sy = (nx * sa + ny * ca) * zoom;
+    let sx = nx;
+    let sy = ny;
 
     // Stage 1: spatial evaluation (t unused, pass 0.0)
     let raw_h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, sx, sy, 0.0);

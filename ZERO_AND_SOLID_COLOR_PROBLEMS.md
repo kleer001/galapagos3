@@ -63,6 +63,31 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
 
 ---
 
+### 4. Shader/Host Instruction-Stride Mismatch (every image blank)
+
+Distinct from the genome-content causes above: this blanks **every** genome at
+once, not specific ones.
+
+Genome bytecode is uploaded to the GPU with a fixed per-genome stride
+(`config::MAX_INSTRUCTIONS`). The compute shader must index genomes at the *same*
+stride through its `INSTRUCTIONS_PER_GENOME` constant, which is generated from
+`config.rs` by `build.rs`. If the shader instead uses its smaller hardcoded
+fallback, `base_idx = genome_index * stride` points at the wrong instructions and
+every pixel resolves to a constant — the whole tile is one flat color (usually
+black).
+
+**Symptom signature:** *every* genome renders as a single solid color, while
+standalone or CPU evaluation of the same genome is varied. That "all genomes, not
+some" pattern points here, not at NaN/`safe01`/degenerate trees.
+
+**Resolution:** the generated constants are baked into the shader source at
+compile time (`include_str!` from `OUT_DIR` in `GpuRenderer`), so the stride is
+correct no matter how the binary is launched — `cargo run`, a launcher script, or
+the bare executable. (Reading the path from a runtime env var fails for a
+directly-launched binary, since that var is only set by `cargo run`.)
+
+---
+
 ## Summary Table
 
 | Cause | Effect | Frequency |
@@ -72,6 +97,7 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
 | V channel = 0.0 | Pure black | Medium |
 | Shallow/degenerate trees | Uniform or gradient-only patterns | High |
 | `Pow()` with negative base returns 0 | Localized dead zones | Medium |
+| Shader/host instruction-stride mismatch | *Every* image one flat color | Build/launch config |
 
 ---
 
