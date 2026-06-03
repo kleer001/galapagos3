@@ -90,7 +90,9 @@ pub struct OutputInfo {
     pub jitter_y: f32,
     /// Color-space id (see config::NUM_COLOR_MODELS). The shader dispatches on this.
     pub color_model: u32,
-    pub _pad: u32,
+    /// Animation clock in seconds. The shader drifts the sample field by this;
+    /// 0.0 is an exact identity (interactive grid and save renders pass 0.0).
+    pub time: f32,
 }
 
 // ============================================================================
@@ -276,7 +278,7 @@ impl GpuRenderer {
         let sr_instr = Self::instructions_to_gpu(&s_remap.instructions);
         let vr_instr = Self::instructions_to_gpu(&v_remap.instructions);
 
-        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h, 0.0, 0.0, color_model).await
+        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, 0.0).await
     }
 
     /// Render a single tile at a specified output size with optional SSAA.
@@ -303,7 +305,33 @@ impl GpuRenderer {
         let vr_instr = instructions_to_gpu_raw(vr_raw);
         self.render_from_gpu_instructions(
             h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
-            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model,
+            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, 0.0,
+        ).await
+    }
+
+    /// Render a single specimen at a given size and animation `time` (seconds).
+    /// Non-zero `time` drives the shader's coordinate drift; used by the widget.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn render_animated(
+        &self,
+        h_raw: &[(u32, i32, i32, i32, f32)],
+        s_raw: &[(u32, i32, i32, i32, f32)],
+        v_raw: &[(u32, i32, i32, i32, f32)],
+        hr_raw: &[(u32, i32, i32, i32, f32)],
+        sr_raw: &[(u32, i32, i32, i32, f32)],
+        vr_raw: &[(u32, i32, i32, i32, f32)],
+        output_w: u32,
+        output_h: u32,
+        ssaa_factor: u32,
+        color_model: u32,
+        time: f32,
+    ) -> RenderResult<Vec<u32>> {
+        let (render_w, render_h) = (output_w * ssaa_factor, output_h * ssaa_factor);
+        self.render_from_gpu_instructions(
+            instructions_to_gpu_raw(h_raw), instructions_to_gpu_raw(s_raw),
+            instructions_to_gpu_raw(v_raw), instructions_to_gpu_raw(hr_raw),
+            instructions_to_gpu_raw(sr_raw), instructions_to_gpu_raw(vr_raw),
+            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, time,
         ).await
     }
 
@@ -338,6 +366,7 @@ impl GpuRenderer {
         jitter_x: f32,
         jitter_y: f32,
         color_model: u32,
+        time: f32,
     ) -> RenderResult<Vec<u32>> {
         let render_size = (render_w * render_h) as usize;
         let output_size = (output_w * output_h) as usize;
@@ -363,7 +392,7 @@ impl GpuRenderer {
         // Create output info buffer (render resolution + jitter for shader)
         let output_info = OutputInfo {
             width: render_w, height: render_h, tile_w: render_w, tile_h: render_h,
-            jitter_x, jitter_y, color_model, _pad: 0,
+            jitter_x, jitter_y, color_model, time,
         };
         let info_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Output Info Buffer"),
@@ -540,7 +569,7 @@ impl GpuRenderer {
 
             let pixels = self.render_from_gpu_instructions(
                 h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
-                render_w, render_h, output_w, output_h, jx, jy, color_model,
+                render_w, render_h, output_w, output_h, jx, jy, color_model, 0.0,
             ).await?;
 
             for (i, &p) in pixels.iter().enumerate() {
