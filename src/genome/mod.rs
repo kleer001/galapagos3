@@ -4,4 +4,4 @@ pub mod op;
 
 pub use node::Node;
 pub use linear::{Genome, Instruction, OpCode};
-pub use op::{op_def, Arity, OpDef, EvalFn};
+pub use op::{op_def, opcode_from_u32, Arity, OpDef, EvalFn};

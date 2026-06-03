@@ -156,6 +156,11 @@ impl Genome {
         self.to_expr_string_with_t("t")
     }
 
+    /// Flatten to GPU-ready raw instruction tuples (op discriminant + operands).
+    pub fn to_raw(&self) -> Vec<(u32, i32, i32, i32, f32)> {
+        self.instructions.iter().map(|i| (i.op as u32, i.a, i.b, i.c, i.value)).collect()
+    }
+
     pub fn eval(&self, x: f32, y: f32, t: f32) -> f32 {
         let mut stack = vec![0.0; MAX_INSTRUCTIONS];
         let mut used = 0;

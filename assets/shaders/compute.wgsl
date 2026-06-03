@@ -84,7 +84,8 @@ struct OutputInfo {
     jitter_y: f32,
     // 0=HSV, 1=RGB, 2=HSL, 3=CMY, 4=YUV (BT.601). Chosen per-render by the host.
     color_model: u32,
-    _pad: u32,
+    // Animation clock in seconds; 0.0 = identity (interactive grid / save renders).
+    time: f32,
 };
 
 // Flat storage buffer of all instructions (6 genomes: H S V H_remap S_remap V_remap)
@@ -699,10 +700,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let nx = (f32(local_x) + output_info.jitter_x) / f32(tile_w) * 2.0 - 1.0;
     let ny = (f32(local_y) + output_info.jitter_y) / f32(tile_h) * 2.0 - 1.0;
 
+    // Animation: slowly rotate + breathe the sample field so time-less genomes
+    // swirl, like a camera gliding through the pattern. time == 0.0 collapses to
+    // an exact identity (ang=0, zoom=1), leaving grid/save renders untouched.
+    let ti = output_info.time;
+    let ang = ti * 0.15;
+    let zoom = 1.0 + 0.15 * sin(ti * 0.21);
+    let ca = cos(ang);
+    let sa = sin(ang);
+    let sx = (nx * ca - ny * sa) * zoom;
+    let sy = (nx * sa + ny * ca) * zoom;
+
     // Stage 1: spatial evaluation (t unused, pass 0.0)
-    let raw_h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
-    let raw_s = evaluate(s_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
-    let raw_v = evaluate(v_genome_idx * INSTRUCTIONS_PER_GENOME, nx, ny, 0.0);
+    let raw_h = evaluate(h_genome_idx * INSTRUCTIONS_PER_GENOME, sx, sy, 0.0);
+    let raw_s = evaluate(s_genome_idx * INSTRUCTIONS_PER_GENOME, sx, sy, 0.0);
+    let raw_v = evaluate(v_genome_idx * INSTRUCTIONS_PER_GENOME, sx, sy, 0.0);
 
     // Stage 2: palette remap (t = raw channel value; nx/ny unused in pure 1D remaps)
     let h = evaluate(hr_genome_idx * INSTRUCTIONS_PER_GENOME, 0.0, 0.0, raw_h);

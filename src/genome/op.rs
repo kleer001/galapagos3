@@ -312,6 +312,12 @@ pub fn op_def(opcode: OpCode) -> &'static OpDef {
     &OP_REGISTRY[opcode as usize]
 }
 
+/// Reconstruct an `OpCode` from its discriminant index — inverse of `op as u32`.
+/// The registry is indexed by discriminant, so entry `n` carries opcode `n`.
+pub fn opcode_from_u32(n: u32) -> Option<OpCode> {
+    OP_REGISTRY.get(n as usize).map(|d| d.opcode)
+}
+
 /// Weighted random selection from a non-empty slice of op definitions.
 pub fn weighted_choice<'a>(eligible: &[&'a OpDef], rng: &mut impl Rng) -> &'a OpDef {
     let total: f32 = eligible.iter().map(|op| op.weight).sum();

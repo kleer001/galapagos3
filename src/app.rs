@@ -698,7 +698,20 @@ impl App {
         );
         std::fs::write(format!("output/{ts:019}_{idx}.txt"), &text)
             .expect("Failed to save expression text");
-        println!("Saved output/{ts:019}_{idx}.png + output/{ts:019}_{idx}.txt");
+
+        // Reloadable genome for the animated widget — the .png/.txt above cannot
+        // be parsed back into a genome, so persist the bytecode too.
+        let spec = galapagos3::specimen::Specimen {
+            channels: [
+                ind.h.clone(), ind.s.clone(), ind.v.clone(),
+                ind.h_remap.clone(), ind.s_remap.clone(), ind.v_remap.clone(),
+            ],
+            color_model: ind.color_model,
+        };
+        galapagos3::specimen::save(
+            std::path::Path::new(&format!("output/{ts:019}_{idx}.gal")), &spec,
+        ).expect("Failed to save genome");
+        println!("Saved output/{ts:019}_{idx}.png + .txt + .gal");
     }
 }
 
