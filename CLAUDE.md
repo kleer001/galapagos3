@@ -6,26 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Galápagos 3.0** is an interactive evolutionary art generator — a GPU-accelerated Rust implementation inspired by Karl Sims' 1991 work. It uses genetic programming to evolve typed mathematical expression trees into 4K visual art, driven by human selection from a tile grid UI.
 
-The project is currently in **planning/scaffold phase**: full architecture documentation exists, but the Rust implementation has not started. The repo contains a Python test scaffold and five design documents.
+The Rust implementation is in place — two binaries (`galapagos3`, the interactive breeder, and `widget`, the animated desktop player) build from `src/`. The original design documents live in `docs/design/`.
 
 ## Commands
 
-### Current (Python scaffold)
-```bash
-pytest              # run all tests
-pytest -v           # verbose
-```
-
-### Future Rust (once implementation begins)
 ```bash
 cargo check         # quick compile check — primary iteration loop
 cargo run           # run with dev optimizations
+cargo test          # run the Rust test suite
 cargo clippy        # lint
 cargo fmt           # format
 cargo watch -x run  # hot reload (requires cargo-watch)
 ```
 
-**Build profiles** (documented in BACKEND.md):
+**Build profiles** (documented in docs/design/BACKEND.md):
 - Dev: `opt-level = 1` (balance compile speed vs perf)
 - Release: `opt-level = 3` + LTO
 
@@ -68,13 +62,13 @@ Shaders live in `assets/shaders/compute.wgsl` as external files (hot-reloadable 
 
 ## Design Documentation
 
-All five `.md` files in the repo root are authoritative design documents — read them before implementing any component:
+The five `.md` files in `docs/design/` are authoritative design documents — read them before implementing any component:
 
-- `ARCHITECTURE.md` — genome types, GPU execution model, mutation/crossover operators, shader caching
-- `BACKEND.md` — Cargo.toml deps, Linux system deps, module boundaries, common failure modes
-- `SKELETON.md` — complete Rust/WGSL skeleton (OpCode enum, Genome struct, compute shader, wgpu setup)
-- `TILE_RENDER.md` — grid layout, tile mapping, selection state, mouse picking, population buffer layout
-- `ROADMAP.md` — 5-phase development plan with function set (45+ operators) and selection modes
+- `docs/design/ARCHITECTURE.md` — genome types, GPU execution model, mutation/crossover operators, shader caching
+- `docs/design/BACKEND.md` — Cargo.toml deps, Linux system deps, module boundaries, common failure modes
+- `docs/design/SKELETON.md` — complete Rust/WGSL skeleton (OpCode enum, Genome struct, compute shader, wgpu setup)
+- `docs/design/TILE_RENDER.md` — grid layout, tile mapping, selection state, mouse picking, population buffer layout
+- `docs/design/ROADMAP.md` — 5-phase development plan with function set (45+ operators) and selection modes
 
 ## Programming Philosophy
 
