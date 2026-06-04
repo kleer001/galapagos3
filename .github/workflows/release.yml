@@ -1,0 +1,86 @@
+name: Release
+
+# Builds the two binaries for each platform and attaches them to the GitHub
+# release for the tag. Each archive bundles `assets/` because the renderer reads
+# `assets/shaders/compute.wgsl` at runtime relative to the working directory.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach binaries to (e.g. v0.2.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # egui/eframe build dependencies on Linux.
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} --bin galapagos3 --bin widget
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          STAGE="galapagos3-${TAG}-${{ matrix.target }}"
+          EXT=""
+          [ "${{ runner.os }}" = "Windows" ] && EXT=".exe"
+          mkdir "$STAGE"
+          cp "target/${{ matrix.target }}/release/galapagos3$EXT" "$STAGE"/
+          cp "target/${{ matrix.target }}/release/widget$EXT" "$STAGE"/
+          cp -r assets "$STAGE"/
+          cp README.md LICENSE "$STAGE"/
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a "$STAGE.zip" "$STAGE" >/dev/null
+            echo "ASSET=$STAGE.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "$STAGE.tar.gz" "$STAGE"
+            echo "ASSET=$STAGE.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: ${{ env.ASSET }}
