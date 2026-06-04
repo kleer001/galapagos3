@@ -50,6 +50,8 @@ const DEFAULT_SPEED_SPREAD: f32 = 0.8;
 /// Default spread of per-parameter phase offsets (desync at t=0; near 0 the
 /// parameters pulse together, higher values scatter them into continuous flow).
 const DEFAULT_PHASE_SPREAD: f32 = 4.0;
+/// Default period, in seconds, of one full cycle in seamless-loop mode.
+const DEFAULT_LOOP_SECS: f32 = 8.0;
 
 type Raw = Vec<(u32, i32, i32, i32, f32)>;
 
@@ -124,6 +126,26 @@ fn walk_frame(
     })
 }
 
+/// Build the live genome at loop phase `t` in [0, 1): every value oscillates ±`drift`
+/// on a sine of exactly one cycle per loop, each with its own phase offset (scaled by
+/// `phase_spread`) so the parameters stay desynchronized. Because every parameter
+/// completes a whole cycle, the frame at t=1 equals the frame at t=0 — a seamless loop.
+/// Unlike `walk_frame`, the cadence/speed-spread controls don't apply here: a
+/// per-parameter speed would make the period non-integer and break the loop.
+fn loop_frame(seed: &Channels, t: f32, drift: f32, phase_spread: f32) -> Channels {
+    std::array::from_fn(|c| {
+        seed[c]
+            .iter()
+            .enumerate()
+            .map(|(j, &(op, a, b, cc, vs))| {
+                let idx = (c as u32).wrapping_mul(100_003).wrapping_add(j as u32);
+                let phase = (hash(idx, 0x9) * 0.5 + 0.5) * phase_spread;
+                (op, a, b, cc, vs + drift * (std::f32::consts::TAU * t + phase).sin())
+            })
+            .collect()
+    })
+}
+
 fn load_library(dir: &Path) -> Vec<Loaded> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|rd| {
@@ -167,6 +189,10 @@ struct Widget {
     drift: f32,
     speed_spread: f32,
     phase_spread: f32,
+    /// false = endless walk; true = seamless loop (every parameter completes a whole cycle).
+    loop_mode: bool,
+    /// Seconds per loop cycle (loop mode only).
+    loop_secs: f32,
     /// Physical pixel size to render at — tracks the display area each frame.
     render_w: u32,
     render_h: u32,
@@ -217,6 +243,8 @@ impl Widget {
             drift: DEFAULT_DRIFT,
             speed_spread: DEFAULT_SPEED_SPREAD,
             phase_spread: DEFAULT_PHASE_SPREAD,
+            loop_mode: false,
+            loop_secs: DEFAULT_LOOP_SECS,
             render_w: WIDGET_W,
             render_h: WIDGET_H,
             render_scale: 0.5,
@@ -278,14 +306,19 @@ impl Widget {
         if !self.paused {
             self.clock += ctx.input(|i| i.stable_dt).min(0.1);
         }
-        let frame = walk_frame(
-            &self.seed,
-            self.clock,
-            self.drift,
-            self.cadence,
-            self.speed_spread,
-            self.phase_spread,
-        );
+        let frame = if self.loop_mode {
+            let t = (self.clock / self.loop_secs.max(0.1)).fract();
+            loop_frame(&self.seed, t, self.drift, self.phase_spread)
+        } else {
+            walk_frame(
+                &self.seed,
+                self.clock,
+                self.drift,
+                self.cadence,
+                self.speed_spread,
+                self.phase_spread,
+            )
+        };
         let t0 = std::time::Instant::now();
         let result = self.rt.block_on(self.gpu.render_animated(
             &frame[0], &frame[1], &frame[2], &frame[3], &frame[4], &frame[5],
@@ -325,6 +358,7 @@ impl eframe::App for Widget {
                 }
                 ui.toggle_value(&mut self.show_prefs, "⚙ Preferences");
                 ui.checkbox(&mut self.mirror, "Mirror");
+                ui.checkbox(&mut self.loop_mode, "Loop");
                 let fps = if self.render_ms > 0.0 { 1000.0 / self.render_ms } else { 0.0 };
                 ui.label(format!(
                     "{:.1} ms  {:.0} fps  {}×{}",
@@ -360,6 +394,9 @@ impl eframe::App for Widget {
                     );
                     ui.add(
                         egui::Slider::new(&mut self.phase_spread, 0.2..=4.0).text("phase spread"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.loop_secs, 2.0..=30.0).text("loop seconds"),
                     );
                     ui.add(
                         egui::Slider::new(&mut self.render_scale, 0.25..=1.0).text("render scale"),
