@@ -1,5 +1,7 @@
 # Galápagos 3.0
 
+![Galápagos 3.0 — an evolved genome animated by the desktop widget](docs/banner.gif)
+
 GPU-accelerated evolutionary art generator. Breeds random mathematical expression trees into 2K images through human selection — inspired by Karl Sims' 1991 work.
 
 **[Project page + interactive explainer →](https://kleer001.github.io/galapagos3/)**
