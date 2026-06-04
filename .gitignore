@@ -208,3 +208,10 @@ __marimo__/
 
 # Galapagos generated output
 output/
+
+# Claude Code session breadcrumbs
+BREADCRUMB.md
+
+# Throwaway render galleries / scratch
+iterations/
+tmp/

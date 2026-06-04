@@ -70,9 +70,12 @@ a real, sharp genome that deforms organically, never a cross-dissolve. Each valu
 wanders on its own staggered clock (independent speed and phase offset), so the
 motion is continuous and never globally pauses.
 
-Rendering tracks the window's native resolution — resize to scale the art up to
-~4K (1:1, no upscaling blur). Use `⏮`/`⏭` to re-seed from the previous/next saved
-genome.
+Rendering tracks the window's resolution. For smooth animation it defaults to a
+reduced internal scale plus a mirrored half-frame — the top-bar **Mirror** toggle
+and the render-scale slider trade sharpness and symmetry for speed, and a live
+frame-time HUD (`ms · fps · WxH`) shows the result. Set render scale to `1.0` and
+turn Mirror off for a sharp, asymmetric 1:1 frame (up to ~4K). Use `⏮`/`⏭` to
+re-seed from the previous/next saved genome.
 
 Preferences (`⚙`):
 
@@ -82,6 +85,7 @@ Preferences (`⚙`):
 | drift amount | how far each value strays from its seed (±) |
 | speed spread | spread of per-parameter clock speeds |
 | phase spread | parameter desync — low values pulse together, high values scatter into continuous flow |
+| render scale | fraction of display resolution to render at, then upscale — lower is faster but softer |
 
 ## How it works
 
