@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Galápagos 3.0** is an interactive evolutionary art generator — a GPU-accelerated Rust implementation inspired by Karl Sims' 1991 work. It uses genetic programming to evolve typed mathematical expression trees into 4K visual art, driven by human selection from a tile grid UI.
+**Galápagos 3.0** is an interactive evolutionary art generator — a GPU-accelerated Rust implementation inspired by Karl Sims' 1991 work. It uses genetic programming to evolve typed mathematical expression trees into 2K visual art, driven by human selection from a tile grid UI.
 
 The Rust implementation is in place — two binaries (`galapagos3`, the interactive breeder, and `widget`, the animated desktop player) build from `src/`. The original design documents live in `docs/design/`.
 
