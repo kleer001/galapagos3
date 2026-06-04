@@ -280,7 +280,7 @@ impl GpuRenderer {
         let sr_instr = Self::instructions_to_gpu(&s_remap.instructions);
         let vr_instr = Self::instructions_to_gpu(&v_remap.instructions);
 
-        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, 0.0).await
+        self.render_from_gpu_instructions(h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr, render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, 0.0, false).await
     }
 
     /// Render a single tile at a specified output size with optional SSAA.
@@ -307,7 +307,7 @@ impl GpuRenderer {
         let vr_instr = instructions_to_gpu_raw(vr_raw);
         self.render_from_gpu_instructions(
             h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
-            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, 0.0,
+            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, 0.0, false,
         ).await
     }
 
@@ -327,13 +327,14 @@ impl GpuRenderer {
         ssaa_factor: u32,
         color_model: u32,
         time: f32,
+        mirror: bool,
     ) -> RenderResult<Vec<u32>> {
         let (render_w, render_h) = (output_w * ssaa_factor, output_h * ssaa_factor);
         self.render_from_gpu_instructions(
             instructions_to_gpu_raw(h_raw), instructions_to_gpu_raw(s_raw),
             instructions_to_gpu_raw(v_raw), instructions_to_gpu_raw(hr_raw),
             instructions_to_gpu_raw(sr_raw), instructions_to_gpu_raw(vr_raw),
-            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, time,
+            render_w, render_h, output_w, output_h, 0.0, 0.0, color_model, time, mirror,
         ).await
     }
 
@@ -369,6 +370,10 @@ impl GpuRenderer {
         jitter_y: f32,
         color_model: u32,
         time: f32,
+        // When true, only the left half of the columns are computed on the GPU and the
+        // right half is mirrored on readback — ~2x faster at the cost of bilateral
+        // symmetry. Only honored on the no-SSAA path (ssaa_factor == 1).
+        mirror: bool,
     ) -> RenderResult<Vec<u32>> {
         let render_size = (render_w * render_h) as usize;
         let output_size = (output_w * output_h) as usize;
@@ -441,7 +446,11 @@ impl GpuRenderer {
             });
             compute_pass.set_pipeline(&self.pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
-            compute_pass.dispatch_workgroups(render_w / 16 + 1, render_h / 16 + 1, 1);
+            // Mirror only computes the left half; the coordinate mapping still uses the
+            // full `render_w` (set in OutputInfo), so the left columns are the true
+            // left half of the image. SSAA is mutually exclusive with mirror.
+            let dispatch_w = if mirror && render_w == output_w { render_w.div_ceil(2) } else { render_w };
+            compute_pass.dispatch_workgroups(dispatch_w / 16 + 1, render_h / 16 + 1, 1);
         }
 
         // Copy to readback buffer
@@ -469,13 +478,19 @@ impl GpuRenderer {
         let mut pixels = Vec::with_capacity(output_size);
 
         if ss_factor <= 1 {
-            // No SSAA: direct copy.
-            for i in 0..output_size {
-                let idx = i * 4;
-                let r = (data[idx] * 255.0) as u32;
-                let g = (data[idx + 1] * 255.0) as u32;
-                let b = (data[idx + 2] * 255.0) as u32;
-                pixels.push((r << 16) | (g << 8) | b);
+            // No SSAA: direct copy, mirroring the right half from the (computed) left
+            // half when `mirror` is set.
+            let w = output_w as usize;
+            let left = render_w.div_ceil(2) as usize;
+            for y in 0..output_h as usize {
+                for x in 0..w {
+                    let src_x = if mirror && x >= left { w - 1 - x } else { x };
+                    let idx = (y * w + src_x) * 4;
+                    let r = (data[idx] * 255.0) as u32;
+                    let g = (data[idx + 1] * 255.0) as u32;
+                    let b = (data[idx + 2] * 255.0) as u32;
+                    pixels.push((r << 16) | (g << 8) | b);
+                }
             }
         } else {
             // Gaussian reconstruction filter — σ = 0.5 output pixels in render space.
@@ -571,7 +586,7 @@ impl GpuRenderer {
 
             let pixels = self.render_from_gpu_instructions(
                 h_instr, s_instr, v_instr, hr_instr, sr_instr, vr_instr,
-                render_w, render_h, output_w, output_h, jx, jy, color_model, 0.0,
+                render_w, render_h, output_w, output_h, jx, jy, color_model, 0.0, false,
             ).await?;
 
             for (i, &p) in pixels.iter().enumerate() {

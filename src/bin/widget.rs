@@ -170,6 +170,13 @@ struct Widget {
     /// Physical pixel size to render at — tracks the display area each frame.
     render_w: u32,
     render_h: u32,
+    /// Fraction of the display resolution to actually render at (then upscaled by
+    /// egui's linear filter). < 1.0 trades sharpness for speed.
+    render_scale: f32,
+    /// Render only the left half on the GPU and mirror it — ~2x faster, bilaterally symmetric.
+    mirror: bool,
+    /// Exponential moving average of the GPU render+readback time (ms), for the HUD.
+    render_ms: f32,
     paused: bool,
     show_prefs: bool,
     tex: Option<TextureHandle>,
@@ -212,6 +219,9 @@ impl Widget {
             phase_spread: DEFAULT_PHASE_SPREAD,
             render_w: WIDGET_W,
             render_h: WIDGET_H,
+            render_scale: 0.5,
+            mirror: true,
+            render_ms: 0.0,
             paused: false,
             show_prefs: false,
             tex: None,
@@ -276,10 +286,15 @@ impl Widget {
             self.speed_spread,
             self.phase_spread,
         );
-        match self.rt.block_on(self.gpu.render_animated(
+        let t0 = std::time::Instant::now();
+        let result = self.rt.block_on(self.gpu.render_animated(
             &frame[0], &frame[1], &frame[2], &frame[3], &frame[4], &frame[5],
-            self.render_w, self.render_h, 1, self.color_model, 0.0,
-        )) {
+            self.render_w, self.render_h, 1, self.color_model, 0.0, self.mirror,
+        ));
+        let ms = t0.elapsed().as_secs_f32() * 1000.0;
+        // EMA so the HUD reads steadily rather than jittering each frame.
+        self.render_ms = if self.render_ms == 0.0 { ms } else { self.render_ms * 0.9 + ms * 0.1 };
+        match result {
             Ok(px) => self.upload(ctx, &px),
             Err(e) => eprintln!("render failed: {e}"),
         }
@@ -309,6 +324,12 @@ impl eframe::App for Widget {
                     self.step(1);
                 }
                 ui.toggle_value(&mut self.show_prefs, "⚙ Preferences");
+                ui.checkbox(&mut self.mirror, "Mirror");
+                let fps = if self.render_ms > 0.0 { 1000.0 / self.render_ms } else { 0.0 };
+                ui.label(format!(
+                    "{:.1} ms  {:.0} fps  {}×{}",
+                    self.render_ms, fps, self.render_w, self.render_h
+                ));
                 if self.library.is_empty() {
                     ui.label("no genomes — save some from the main app");
                 } else {
@@ -340,6 +361,9 @@ impl eframe::App for Widget {
                     ui.add(
                         egui::Slider::new(&mut self.phase_spread, 0.2..=4.0).text("phase spread"),
                     );
+                    ui.add(
+                        egui::Slider::new(&mut self.render_scale, 0.25..=1.0).text("render scale"),
+                    );
                     ui.label(format!("source: {}", self.dir.display()));
                     if ui.button("⟳ Reload library").clicked() {
                         self.library = load_library(&self.dir);
@@ -357,8 +381,11 @@ impl eframe::App for Widget {
             // Track the display area in physical pixels so the next frame renders
             // at native resolution (1:1, sharp). Resizing the window resizes the art.
             let ppp = ui.ctx().pixels_per_point();
-            let (rw, rh) =
-                clamp_render_size((rect.width() * ppp) as u32, (rect.height() * ppp) as u32);
+            let s = self.render_scale;
+            let (rw, rh) = clamp_render_size(
+                (rect.width() * ppp * s) as u32,
+                (rect.height() * ppp * s) as u32,
+            );
             self.render_w = rw;
             self.render_h = rh;
             if let Some(tex) = &self.tex {
