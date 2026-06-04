@@ -8,6 +8,17 @@ GPU-accelerated evolutionary art generator. Breeds random mathematical expressio
 
 ## Install
 
+### Download a prebuilt binary
+
+No Rust toolchain needed. Grab the archive for your platform from the
+**[Releases page](https://github.com/kleer001/galapagos3/releases/latest)** —
+Linux, macOS (Intel + Apple Silicon), and Windows. Each archive contains both
+binaries (`galapagos3` and `widget`) alongside an `assets/` folder; extract it
+and run from inside the extracted folder (the renderer loads its shader from
+`assets/` relative to the working directory).
+
+### Build from source
+
 **Linux / macOS:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/kleer001/galapagos3/main/bootstrap.sh | bash
